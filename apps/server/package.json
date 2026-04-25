@@ -1,0 +1,9 @@
+{
+  "name": "ai-proxy-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}
