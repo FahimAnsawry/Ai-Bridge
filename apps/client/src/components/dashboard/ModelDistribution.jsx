@@ -59,16 +59,15 @@ const COLORS = ['#6366f1', '#10b981', '#a855f7', '#fb7185', '#22d3ee', '#fbbf24'
 
 const ModelDistribution = ({ data = [], loading = false }) => {
   const [hoveredIndex, setHoveredIndex] = useState(null);
-  const [activeIndex, setActiveIndex] = useState(null);
 
   if (loading) {
     return (
       <div
-      className="relative p-6 rounded-2xl overflow-hidden"
+        className="relative p-5 rounded-2xl overflow-hidden"
         style={{
           background: 'var(--color-bg-panel)',
           border: '1px solid var(--color-glass-border)',
-          height: 380,
+          height: 330,
         }}
       />
     );
@@ -79,7 +78,7 @@ const ModelDistribution = ({ data = [], loading = false }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.3 }}
-      className="relative p-6 rounded-2xl overflow-hidden"
+      className="relative p-5 rounded-2xl overflow-hidden"
       style={{
         background: 'var(--color-bg-panel)',
         border: '1px solid var(--color-glass-border)',
@@ -87,7 +86,7 @@ const ModelDistribution = ({ data = [], loading = false }) => {
     >
       <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' }} />
 
-      <div className="mb-4">
+      <div className="mb-3.5">
         <h3 className="text-base font-bold text-[--color-text-primary]">Model Distribution</h3>
         <p className="text-xs font-medium text-[--color-text-tertiary] mt-0.5">
           Traffic split across deployed models
@@ -95,7 +94,7 @@ const ModelDistribution = ({ data = [], loading = false }) => {
       </div>
 
       {data.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="flex flex-col items-center justify-center py-12 gap-3">
           <div
             className="h-14 w-14 rounded-2xl flex items-center justify-center"
             style={{
@@ -110,20 +109,22 @@ const ModelDistribution = ({ data = [], loading = false }) => {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-6">
-          <div className="flex-1 w-full" style={{ minHeight: 220 }}>
-            <ResponsiveContainer width="100%" height={220}>
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex-1 w-full" style={{ minHeight: 190 }}>
+            <ResponsiveContainer width="100%" height={190}>
               <PieChart>
                 <Pie
                   data={data}
                   cx="50%"
                   cy="50%"
-                  innerRadius={65}
-                  outerRadius={95}
+                  innerRadius={60}
+                  outerRadius={88}
                   paddingAngle={2}
                   dataKey="requests"
-                  onMouseEnter={(_, index) => { setHoveredIndex(index); setActiveIndex(index); }}
-                  onMouseLeave={() => { setHoveredIndex(null); setActiveIndex(null); }}
+                  labelLine={false}
+                  label={CustomLabel}
+                  onMouseEnter={(_, index) => setHoveredIndex(index)}
+                  onMouseLeave={() => setHoveredIndex(null)}
                 >
                   {data.map((entry, index) => (
                     <Cell

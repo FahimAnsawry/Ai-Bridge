@@ -13,6 +13,17 @@ const requestLogSchema = new mongoose.Schema({
   completionTokens: Number,
   streaming: Boolean,
   provider: String,
+  optimization: {
+    enabled: Boolean,
+    promptBudget: Number,
+    promptTokensBefore: Number,
+    promptTokensAfter: Number,
+    pruned: Boolean,
+    prunedCount: Number,
+    summarized: Boolean,
+    cacheEligible: Boolean,
+    cacheHit: Boolean,
+  },
   error: String
 });
 

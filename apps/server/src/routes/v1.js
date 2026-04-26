@@ -18,6 +18,7 @@
 const express = require('express');
 const { requireAccessKey } = require('../middlewares/auth-middleware');
 const { proxyRequest } = require('../services/proxy');
+const { estimatePromptTokens } = require('../utils/token-budget');
 
 const router = express.Router();
 
@@ -40,35 +41,20 @@ router.post('/chat/completions', proxyRequest);
 
 // ── Anthropic Messages API (Claude Code, Cline, Roo Code) ─────────────────────
 router.post('/messages', (req, res, next) => {
-  console.log('[Claude CLI] Incoming /messages request:');
-  console.log('[Claude CLI] Body model:', req.body?.model, '| stream:', req.body?.stream);
+  // console.log('[Claude CLI] Incoming /messages request:');
+  // console.log('[Claude CLI] Body model:', req.body?.model, '| stream:', req.body?.stream);
   next();
 }, proxyRequest);
 
 // ── count_tokens: handled LOCALLY — AgentRouter doesn't support this endpoint.
 // Claude CLI calls this before every message; a 404/503 upstream causes retry loops.
 router.post('/messages/count_tokens', (req, res) => {
-  const messages = req.body?.messages || [];
+  const inputTokens = estimatePromptTokens({
+    system: req.body?.system,
+    messages: req.body?.messages || [],
+  });
 
-  // system can be a string or an array of content blocks
-  const systemText = typeof req.body?.system === 'string'
-    ? req.body.system
-    : Array.isArray(req.body?.system)
-      ? req.body.system.map(b => b.text || '').join('')
-      : '';
-
-  let charCount = systemText.length;
-  for (const msg of messages) {
-    const c = msg.content;
-    if (typeof c === 'string') {
-      charCount += c.length;
-    } else if (Array.isArray(c)) {
-      charCount += c.map(b => b.text || '').join('').length;
-    }
-  }
-
-  const inputTokens = Math.max(1, Math.ceil(charCount / 4));
-  console.log(`[count_tokens] Estimated ${inputTokens} tokens locally (no upstream call)`);
+  // console.log(`[count_tokens] Estimated ${inputTokens} tokens locally (no upstream call)`);
   return res.json({ input_tokens: inputTokens });
 });
 

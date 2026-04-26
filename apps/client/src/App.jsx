@@ -35,9 +35,9 @@ function AppContent() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    console.log('Current URL params:', params.toString());
+    // console.log('Current URL params:', params.toString());
     if (params.get('login') === 'success') {
-      console.log('Login success detected');
+      // console.log('Login success detected');
       const isFirst = params.get('first') === 'true';
       showToast(isFirst ? 'Login successful' : 'Welcome back!', 'success');
       // Clean up URL
@@ -45,7 +45,7 @@ function AppContent() {
       window.history.replaceState({}, '', newUrl);
     }
     if (params.get('logout') === 'success') {
-      console.log('Logout success detected');
+      // console.log('Logout success detected');
       showToast('Signed out successfully', 'success');
       // Clean up URL
       const newUrl = window.location.pathname;

@@ -3,22 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const BASE_BADGE = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-black uppercase tracking-widest border';
 
-const METHOD_STYLES = {
-  POST: `${BASE_BADGE} text-[#818cf8] border-[rgba(99,102,241,0.3)]`,
-  GET: `${BASE_BADGE} text-[#34d399] border-[rgba(16,185,129,0.3)]`,
-  DELETE: `${BASE_BADGE} text-[#fb7185] border-[rgba(251,113,133,0.3)]`,
-  PUT: `${BASE_BADGE} text-[#fbbf24] border-[rgba(251,191,36,0.3)]`,
-  PATCH: `${BASE_BADGE} text-[#94a3b8] border-[rgba(148,163,184,0.2)]`,
-};
-
-const METHOD_BG = {
-  POST: 'rgba(99,102,241,0.08)',
-  GET: 'rgba(16,185,129,0.08)',
-  DELETE: 'rgba(251,113,133,0.08)',
-  PUT: 'rgba(251,191,36,0.08)',
-  PATCH: 'rgba(148,163,184,0.06)',
-};
-
 function formatTime(isoString) {
   if (!isoString) return '—';
   return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -65,7 +49,7 @@ const LogTable = ({ logs = [], loading = false }) => {
       <table className="w-full border-collapse">
         <thead>
           <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            {['Time', 'Endpoint', 'Model', 'Provider', 'Status', 'Latency', 'Tokens', 'Type'].map((col) => (
+            {['Time', 'Model', 'Provider', 'Status', 'Tokens', 'Type'].map((col) => (
               <th
                 key={col}
                 className="px-4 py-3.5 text-left text-xs font-black uppercase tracking-[0.2em] text-[--color-text-tertiary]"
@@ -92,35 +76,10 @@ const LogTable = ({ logs = [], loading = false }) => {
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.04)'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  {/* Time */}
                   <td className="px-4 py-3.5 whitespace-nowrap font-mono text-[11px] font-bold text-[--color-text-tertiary]">
                     {formatTime(log.timestamp)}
                   </td>
 
-                  {/* Endpoint */}
-                  <td className="px-4 py-3.5">
-                    <div className="flex min-w-[14rem] flex-col gap-1.5">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span
-                          className={METHOD_STYLES[log.method] || METHOD_STYLES.PATCH}
-                          style={{ background: METHOD_BG[log.method] || METHOD_BG.PATCH }}
-                        >
-                          {log.method}
-                        </span>
-                        {log.streaming && (
-                          <span
-                            className={BASE_BADGE}
-                            style={{ background: 'rgba(168,85,247,0.08)', color: '#c084fc', borderColor: 'rgba(168,85,247,0.25)' }}
-                          >
-                            Stream
-                          </span>
-                        )}
-                      </div>
-                      <span className="break-all text-[11px] font-bold text-[--color-text-secondary] opacity-70">{log.path}</span>
-                    </div>
-                  </td>
-
-                  {/* Model */}
                   <td className="px-4 py-3.5">
                     {log.model && log.model !== 'unknown' ? (
                       <code
@@ -138,7 +97,6 @@ const LogTable = ({ logs = [], loading = false }) => {
                     )}
                   </td>
 
-                  {/* Provider */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
                     {log.provider ? (
                       <span
@@ -156,7 +114,6 @@ const LogTable = ({ logs = [], loading = false }) => {
                     )}
                   </td>
 
-                  {/* Status */}
                   <td className="px-4 py-3.5">
                     <div
                       className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest"
@@ -177,23 +134,12 @@ const LogTable = ({ logs = [], loading = false }) => {
                     </div>
                   </td>
 
-                  {/* Latency */}
-                  <td className="px-4 py-3.5 whitespace-nowrap text-xs font-bold text-[--color-text-secondary]">
-                    {log.latencyMs != null ? (
-                      <span style={{ color: log.latencyMs > 2000 ? '#fb7185' : log.latencyMs > 800 ? '#fbbf24' : '#34d399' }}>
-                        {log.latencyMs}ms
-                      </span>
-                    ) : '—'}
-                  </td>
-
-                  {/* Tokens */}
                   <td className="px-4 py-3.5 text-xs font-bold text-[--color-text-secondary]">
                     {tokens > 0 ? (
                       <span style={{ color: '#818cf8' }}>{tokens.toLocaleString()}</span>
                     ) : '—'}
                   </td>
 
-                  {/* Type */}
                   <td className="px-4 py-3.5">
                     {log.streaming ? (
                       <span

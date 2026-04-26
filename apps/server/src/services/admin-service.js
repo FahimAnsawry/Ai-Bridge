@@ -35,6 +35,15 @@ function createAdminService(runtime) {
       uptimeFormatted: runtimeState.running ? formatUptime(Date.now() - runtimeState.startedAt) : 'Stopped',
       totalRequests: stats.totalRequests,
       avgLatencyMs: stats.avgLatency,
+      totalTokens: stats.totalTokens,
+      estimatedTokenSavings: stats.estimatedTokenSavings || 0,
+      optimizationRequests: stats.optimizationRequests || 0,
+      summarizedRequests: stats.summarizedRequests || 0,
+      tokensSavedByPrune: stats.tokensSavedByPrune || 0,
+      tokensSavedBySummary: stats.tokensSavedBySummary || 0,
+      cacheEligible: stats.cacheEligible || 0,
+      cacheHits: stats.cacheHits || 0,
+      cacheHitRate: stats.cacheHitRate || 0,
       errorCount: stats.errors,
       errorRate: errorRate,
       activeModels: modelCount,
@@ -140,7 +149,7 @@ function createAdminService(runtime) {
     // If I changed `createProxyRuntime` to take `userId`, then how does index.js start it for all users? 
     // Oh, the AI proxy logic might be per-user or the dashboard uses one global runtime that delegates?
     // Let's just pass userId down.
-    return await runtime.syncModels({ persist: true });
+    return await runtime.syncModels({ persist: true, userId });
   }
 
   // --- Admin Methods ---

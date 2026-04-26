@@ -97,8 +97,12 @@ const Models = ({ user }) => {
         { id: 'kimi-k2.6', name: 'Kimi K2.6', owned_by: 'moonshot' },
         { id: 'minimax-m2.7', name: 'MiniMax M2.7', owned_by: 'minimax' },
         { id: 'qwen-3.6-plus', name: 'Qwen 3.6 Plus', owned_by: 'alibaba' },
+ { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B', owned_by: 'alibaba' },
         { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', owned_by: 'google' },
-        { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', owned_by: 'google' }
+        { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', owned_by: 'google' },
+        { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', owned_by: 'google' },
+        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', owned_by: 'openai' },
+ { id: 'gpt-5.5', name: 'GPT-5.5', owned_by: 'openai' }
       ];
 
       const allModels = [...fetchedModels];
@@ -177,3 +181,6 @@ const Models = ({ user }) => {
 };
 
 export default Models;
+
+
+

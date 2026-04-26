@@ -17,7 +17,20 @@ const memoryStats = new Map(); // userId -> { totalRequests, totalTokens, errors
 const memoryLogs = new Map();  // userId -> [log1, log2, ...]
 
 function getInitialMemoryStats() {
-  return { totalRequests: 0, totalTokens: 0, errors: 0, sumLatency: 0 };
+  return {
+    totalRequests: 0,
+    totalTokens: 0,
+    errors: 0,
+    sumLatency: 0,
+    optimizationRequests: 0,
+    summarizedRequests: 0,
+    cacheEligible: 0,
+    cacheHits: 0,
+    promptTokensBefore: 0,
+    promptTokensAfter: 0,
+    tokensSavedByPrune: 0,
+    tokensSavedBySummary: 0,
+  };
 }
 
 /** Attach the Socket.io instance so we can emit events. */
@@ -46,7 +59,10 @@ async function addLog(entry, userId, accessKey) {
     timestamp: new Date()
   };
 
-  const plainRecord = record;
+  const plainRecord = {
+    ...record,
+    id: record._id.toString(),
+  };
 
   // Update in-memory stats
   const uIdStr = userId.toString();
@@ -56,6 +72,26 @@ async function addLog(entry, userId, accessKey) {
   stats.totalTokens += (entry.promptTokens || 0) + (entry.completionTokens || 0);
   if (entry.status >= 400) stats.errors++;
   stats.sumLatency += (entry.latencyMs || 0);
+
+  const optimization = entry.optimization || {};
+  if (optimization.enabled) stats.optimizationRequests++;
+  if (optimization.summarized) stats.summarizedRequests++;
+  if (optimization.cacheEligible) stats.cacheEligible++;
+  if (optimization.cacheHit) stats.cacheHits++;
+  if (Number.isFinite(optimization.promptTokensBefore)) {
+    stats.promptTokensBefore += optimization.promptTokensBefore;
+  }
+  if (Number.isFinite(optimization.promptTokensAfter)) {
+    stats.promptTokensAfter += optimization.promptTokensAfter;
+  } else if (Number.isFinite(optimization.promptTokensBefore)) {
+    stats.promptTokensAfter += optimization.promptTokensBefore;
+  }
+  if (Number.isFinite(optimization.tokensSavedByPrune)) {
+    stats.tokensSavedByPrune += optimization.tokensSavedByPrune;
+  }
+  if (Number.isFinite(optimization.tokensSavedBySummary)) {
+    stats.tokensSavedBySummary += optimization.tokensSavedBySummary;
+  }
 
   // Update in-memory logs (keep last 50)
   if (!memoryLogs.has(uIdStr)) memoryLogs.set(uIdStr, []);
@@ -126,23 +162,57 @@ async function getStats(userId) {
       global.totalTokens += stats.totalTokens;
       global.errors += stats.errors;
       global.sumLatency += stats.sumLatency;
+      global.optimizationRequests += stats.optimizationRequests;
+      global.summarizedRequests += stats.summarizedRequests;
+      global.cacheEligible += stats.cacheEligible;
+      global.cacheHits += stats.cacheHits;
+      global.promptTokensBefore += stats.promptTokensBefore;
+      global.promptTokensAfter += stats.promptTokensAfter;
+      global.tokensSavedByPrune += stats.tokensSavedByPrune;
+      global.tokensSavedBySummary += stats.tokensSavedBySummary;
     }
+    const tokenSavings = Math.max(0, global.promptTokensBefore - global.promptTokensAfter);
+    const cacheHitRate = global.cacheEligible > 0 ? Math.round((global.cacheHits / global.cacheEligible) * 100) : 0;
+
     return {
       totalRequests: global.totalRequests,
       avgLatency: global.totalRequests > 0 ? Math.round(global.sumLatency / global.totalRequests) : 0,
       totalTokens: global.totalTokens,
-      errors: global.errors
+      errors: global.errors,
+      optimizationRequests: global.optimizationRequests,
+      summarizedRequests: global.summarizedRequests,
+      cacheEligible: global.cacheEligible,
+      cacheHits: global.cacheHits,
+      cacheHitRate,
+      promptTokensBefore: global.promptTokensBefore,
+      promptTokensAfter: global.promptTokensAfter,
+      tokensSavedByPrune: global.tokensSavedByPrune,
+      tokensSavedBySummary: global.tokensSavedBySummary,
+      estimatedTokenSavings: tokenSavings,
     };
   }
 
   const uIdStr = userId.toString();
   const stats = memoryStats.get(uIdStr) || getInitialMemoryStats();
 
+  const tokenSavings = Math.max(0, stats.promptTokensBefore - stats.promptTokensAfter);
+  const cacheHitRate = stats.cacheEligible > 0 ? Math.round((stats.cacheHits / stats.cacheEligible) * 100) : 0;
+
   return {
     totalRequests: stats.totalRequests,
     avgLatency: stats.totalRequests > 0 ? Math.round(stats.sumLatency / stats.totalRequests) : 0,
     totalTokens: stats.totalTokens,
-    errors: stats.errors
+    errors: stats.errors,
+    optimizationRequests: stats.optimizationRequests,
+    summarizedRequests: stats.summarizedRequests,
+    cacheEligible: stats.cacheEligible,
+    cacheHits: stats.cacheHits,
+    cacheHitRate,
+    promptTokensBefore: stats.promptTokensBefore,
+    promptTokensAfter: stats.promptTokensAfter,
+    tokensSavedByPrune: stats.tokensSavedByPrune,
+    tokensSavedBySummary: stats.tokensSavedBySummary,
+    estimatedTokenSavings: tokenSavings,
   };
 }
 
@@ -170,7 +240,7 @@ function subscribe(listener) {
 const morganStream = {
   write(message) {
     // Morgan lines end with \n — strip it
-    console.log('[HTTP]', message.trimEnd());
+    // console.log('[HTTP]', message.trimEnd());
   },
 };
 

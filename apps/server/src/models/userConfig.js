@@ -9,6 +9,11 @@ const userConfigSchema = new mongoose.Schema({
   activeProviderId: String,
   requestMinimizationEnabled: { type: Boolean, default: true },
   chatMaxUpstreamAttempts: { type: Number, default: 4 },
+  tokenOptimizationEnabled: { type: Boolean, default: false },
+  promptBudgetTokens: { type: Number, default: 0 },
+  tokenSummarizationEnabled: { type: Boolean, default: false },
+  responseCacheEnabled: { type: Boolean, default: false },
+  responseCacheTtlSeconds: { type: Number, default: 30 },
   port: Number
 }, { timestamps: true });
 

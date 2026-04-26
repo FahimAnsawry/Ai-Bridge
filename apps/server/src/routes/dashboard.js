@@ -29,6 +29,11 @@ const ALLOWED_CONFIG_FIELDS = [
   'stub_models',
   'request_minimization_enabled',
   'chat_max_upstream_attempts',
+  'token_optimization_enabled',
+  'prompt_budget_tokens',
+  'token_summarization_enabled',
+  'response_cache_enabled',
+  'response_cache_ttl_seconds',
 ];
 
 function createDashboardRouter(runtime) {
@@ -55,8 +60,8 @@ function createDashboardRouter(runtime) {
 
   router.post('/config', async (req, res) => {
     try {
-      console.log('[config] POST request body:', JSON.stringify(req.body, null, 2));
-      
+      // console.log('[config] POST request body:', JSON.stringify(req.body, null, 2));
+
       const updates = {};
       for (const key of ALLOWED_CONFIG_FIELDS) {
         if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -67,7 +72,7 @@ function createDashboardRouter(runtime) {
       }
 
       const result = await adminService.saveConfig(req.user._id, updates);
-      console.log('[config] Save result:', result ? 'success' : 'failed/undefined');
+      // console.log('[config] Save result:', result ? 'success' : 'failed/undefined');
       res.json(result);
     } catch (error) {
       console.error('[config] Save failed:', error.message);

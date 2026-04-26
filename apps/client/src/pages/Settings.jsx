@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Save, Plus, Trash2, Zap, Globe, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Zap, Globe, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { fetchConfig, saveConfig, fetchAuthStatus } from '../api';
 import AccessKeyDisplay from '../components/common/AccessKeyDisplay';
 import { useToast } from '../context/ToastContext';
@@ -32,7 +32,17 @@ const Card = ({ children, className = '' }) => (
 );
 
 const Settings = ({ user: initialUser }) => {
-  const [form, setForm] = useState({ local_api_key: '', active_provider_id: '', providers: [], port: 3000 });
+  const [form, setForm] = useState({
+    local_api_key: '',
+    active_provider_id: '',
+    providers: [],
+    port: 3000,
+    token_optimization_enabled: false,
+    prompt_budget_tokens: 0,
+    token_summarization_enabled: false,
+    response_cache_enabled: false,
+    response_cache_ttl_seconds: 30,
+  });
   const [user, setUser] = useState(initialUser);
   const [expandedIds, setExpandedIds] = useState({});
   const [loading, setLoading] = useState(true);
@@ -41,7 +51,17 @@ const Settings = ({ user: initialUser }) => {
 
   useEffect(() => {
     Promise.all([fetchConfig(), fetchAuthStatus()]).then(([cfg, authData]) => {
-        setForm({ local_api_key: cfg.local_api_key || '', active_provider_id: cfg.active_provider_id || '', providers: cfg.providers || [], port: cfg.port || 3000 });
+        setForm({
+          local_api_key: cfg.local_api_key || '',
+          active_provider_id: cfg.active_provider_id || '',
+          providers: cfg.providers || [],
+          port: cfg.port || 3000,
+          token_optimization_enabled: cfg.token_optimization_enabled === true,
+          prompt_budget_tokens: cfg.prompt_budget_tokens || 0,
+          token_summarization_enabled: cfg.token_summarization_enabled === true,
+          response_cache_enabled: cfg.response_cache_enabled === true,
+          response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
+        });
         setUser(authData.user);
         setLoading(false);
         setExpandedIds({});
@@ -272,22 +292,6 @@ const Settings = ({ user: initialUser }) => {
 
         <div className="lg:col-span-5 space-y-6 lg:space-y-4">
           <AccessKeyDisplay accessKey={user?.accessKey} />
-
-          <Card className="p-4 lg:p-5">
-              <h2 className="text-base font-bold text-white mb-5 flex items-center gap-3">
-                <div className="p-2 bg-indigo-500/10 rounded-lg">
-                  <Save className="text-indigo-500" size={16} />
-                </div>
-                Gateway Configuration
-              </h2>
-              <div className="space-y-4">
-                  <Input label="Gateway Port" type="number" value={form.port || ''} onChange={e => {
-                      const next = {...form, port: e.target.value};
-                      setForm(next);
-                      saveConfig(next);
-                  }} />
-              </div>
-          </Card>
 
           <Card className="bg-indigo-500/5 border-indigo-500/20 p-4 lg:p-5">
             <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-2">Configuration Note</h3>

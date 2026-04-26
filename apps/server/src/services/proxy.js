@@ -12,7 +12,14 @@ const path = require('path');
 const { loadConfig } = require('../config/config');
 
 const { addLog } = require('../middlewares/logger');
-
+const {
+  estimatePromptTokens,
+  pruneMessagesToBudget,
+  summarizeMessagesToBudget,
+  createCacheKey,
+  readCachedResponse,
+  storeCachedResponse,
+} = require('../utils/token-budget');
 // Verbose debug logging removed for latency performance.
 // Essential logs kept: request line, response status, errors, warnings.
 
@@ -32,6 +39,9 @@ const httpsAgent = new https.Agent({
   timeout: 60000,
   freeSocketTimeout: 30000,
 });
+
+const responseCache = new Map();
+const RESPONSE_CACHE_MAX_ENTRIES = 200;
 /**
  * normalizeMessages — Ensures the messages array conforms to expectations
  * of common OpenAI-style upstreams, even if the client is Anthropic-style.
@@ -245,6 +255,20 @@ function normalizeMessages(messages, targetModel = '') {
     cleaned = [{ role: 'system', content: systemContent }, ...withoutSystem];
   } else {
     cleaned = withoutSystem;
+  }
+
+  // Phase 2.6: Ensure conversation starts with a user message.
+  // Pruning (or malformed client input) can leave the first non-system message as
+  // 'assistant' or 'tool', which most upstream APIs reject — sometimes with 504
+  // (gateway timeout) instead of a clean 400. Insert a lightweight bridge turn.
+  {
+    const firstNonSysIdx = cleaned.findIndex(m => m.role !== 'system');
+    if (firstNonSysIdx >= 0 && cleaned[firstNonSysIdx].role !== 'user') {
+      cleaned.splice(firstNonSysIdx, 0, {
+        role: 'user',
+        content: '[Earlier context was trimmed to fit within the context window]',
+      });
+    }
   }
 
   // Phase 3: Strict Tool Call/Response Alignment (Gemini-compatible)
@@ -559,7 +583,7 @@ class AnthropicSSETranslator {
 
   start() {
     if (this.sentMessageStart) return;
-    console.log('[SSE] → message_start');
+    // console.log('[SSE] → message_start');
     this.res.write('event: message_start\n');
     this.res.write(`data: ${JSON.stringify({
       type: 'message_start',
@@ -725,7 +749,7 @@ class AnthropicSSETranslator {
 
     this.res.write('event: message_stop\n');
     this.res.write('data: {"type": "message_stop"}\n\n');
-    console.log('[SSE] → message_stop');
+    // console.log('[SSE] → message_stop');
   }
 }
 
@@ -752,12 +776,12 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   const isGitHubModels = baseUrl.includes('models.github.ai') || baseUrl.includes('models.inference.ai.azure.com') || (baseUrl.includes('api.github.com') && req.path.includes('/models'));
 
   // GitHub Models requires specific GitHub API headers
-  if (isGitHubModels) {
-    const isStreamingReq = req.body?.stream === true;
-    headers['accept'] = isStreamingReq ? 'text/event-stream' : 'application/vnd.github+json';
-    headers['x-github-api-version'] = '2022-11-28';
-    console.log(`[proxy] GitHub Models: adding GitHub API headers (streaming=${isStreamingReq})`);
-  }
+    if (isGitHubModels) {
+      const isStreamingReq = req.body?.stream === true;
+      headers['accept'] = isStreamingReq ? 'text/event-stream' : 'application/vnd.github+json';
+      headers['x-github-api-version'] = '2022-11-28';
+      // console.log(`[proxy] GitHub Models: adding GitHub API headers (streaming=${isStreamingReq})`);
+    }
 
   // ── Path handling ───────────────────────────────────────────
   let upstreamPath = req.path; // e.g., "/messages" or "/chat/completions"
@@ -767,7 +791,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   const isEcom = baseUrl.includes('ecom');
 
   if (upstreamPath.endsWith('/messages') && !isAnthropic) {
-    console.log(`[proxy] Mapping /messages → /chat/completions for ${isEcom ? 'ecom' : 'OpenAI-compatible'} upstream`);
+    // console.log(`[proxy] Mapping /messages → /chat/completions for ${isEcom ? 'ecom' : 'OpenAI-compatible'} upstream`);
     upstreamPath = upstreamPath.replace('/messages', '/chat/completions');
   }
 
@@ -829,12 +853,12 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
         bodyData.model.toLowerCase().includes('google')
       );
       if (baseUrl.includes('qwqtao') || baseUrl.includes('tao') || isGeminiModel) {
-        console.log(`[proxy-debug] Upstream model: ${bodyData.model} → ${baseUrl}`);
+        // console.log(`[proxy-debug] Upstream model: ${bodyData.model} → ${baseUrl}`);
         bodyData.messages.forEach((m, i) => {
           const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls.length : 0;
           const isTool = m.role === 'tool' ? 1 : 0;
           const tcIds = Array.isArray(m.tool_calls) ? m.tool_calls.map(tc => tc.id).join(',') : '';
-          console.log(`  msg[${i}] role=${m.role} content=${typeof m.content === 'string' ? m.content.slice(0, 30) + '...' : (m.content === null ? 'null' : '?')} tool_calls=${toolCalls}${tcIds ? ` [${tcIds}]` : ''} is_tool_resp=${isTool}${isTool ? ` id=${m.tool_call_id} name=${m.name}` : ''}`);
+          // console.log(`  msg[${i}] role=${m.role} content=${typeof m.content === 'string' ? m.content.slice(0, 30) + '...' : (m.content === null ? 'null' : '?')} tool_calls=${toolCalls}${tcIds ? ` [${tcIds}]` : ''} is_tool_resp=${isTool}${isTool ? ` id=${m.tool_call_id} name=${m.name}` : ''}`);
         });
       }
     }
@@ -881,9 +905,9 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
         .replace(/claude-3[-\w.]*opus[\w.-]*/g, 'claude-opus-4.6');
     }
     if (originalEcomModel !== bodyData.model) {
-      console.log(`[proxy] EcomAgent model remap: ${originalEcomModel} → ${bodyData.model}`);
+      // console.log(`[proxy] EcomAgent model remap: ${originalEcomModel} → ${bodyData.model}`);
     } else {
-      console.log(`[proxy] EcomAgent model name → ${bodyData.model}`);
+      // console.log(`[proxy] EcomAgent model name → ${bodyData.model}`);
     }
   }
 
@@ -893,7 +917,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   }
 
 
-  console.log(`[proxy] → ${req.method} ${upstreamUrl}${req.query ? '?' + new URLSearchParams(req.query) : ''}`);
+  // console.log(`[proxy] → ${req.method} ${upstreamUrl}${req.query ? '?' + new URLSearchParams(req.query) : ''}`);
 
   // Select agent based on URL protocol
   const agent = upstreamUrl.startsWith('http:') ? httpAgent : httpsAgent;
@@ -980,6 +1004,30 @@ async function proxyRequest(req, res) {
   const attemptState = initializeAttemptState(req, config);
   const requestedModel = req.body?.model || 'unknown';
 
+  const optimizationEnabled = true;
+  const promptBudget = Number(config.prompt_budget_tokens) > 0 ? Number(config.prompt_budget_tokens) : 12000;
+  const summarizationEnabled = true;
+  const cacheEnabled = config.response_cache_enabled === true;
+  const cacheTtlSeconds = Number(config.response_cache_ttl_seconds) > 0 ? Number(config.response_cache_ttl_seconds) : 30;
+  const shouldOptimizePrompt = optimizationEnabled && isChatGenerationRequest(req) && req.body && Array.isArray(req.body.messages);
+
+  let optimizationMeta = {
+    enabled: optimizationEnabled,
+    promptBudget,
+    promptTokensBefore: null,
+    promptTokensAfter: null,
+    promptTokensAfterPrune: null,
+    promptTokensAfterSummary: null,
+    pruned: false,
+    prunedCount: 0,
+    summarized: false,
+    summaryReplacedCount: 0,
+    tokensSavedByPrune: 0,
+    tokensSavedBySummary: 0,
+    cacheEligible: false,
+    cacheHit: false,
+  };
+
   if (attemptState.applies && attemptState.enabled) {
     const { allowed, state } = consumeAttempt(req);
     if (!allowed) {
@@ -1002,12 +1050,102 @@ async function proxyRequest(req, res) {
         },
       });
     }
-    console.log(`[proxy] Outbound attempt ${state.usedAttempts}/${state.maxAttempts} for ${req.path}`);
+    // console.log(`[proxy] Outbound attempt ${state.usedAttempts}/${state.maxAttempts} for ${req.path}`);
   } else if (attemptState.applies) {
-    console.log('[proxy] Request minimization disabled for chat request');
+    // console.log('[proxy] Request minimization disabled for chat request');
+  }
+
+  if (shouldOptimizePrompt) {
+    const preEstimate = estimatePromptTokens({
+      system: req.body?.system,
+      messages: req.body.messages,
+    });
+    optimizationMeta.promptTokensBefore = preEstimate;
+
+    let currentTokens = preEstimate;
+
+    if (promptBudget > 0 && preEstimate > promptBudget) {
+      const pruneResult = pruneMessagesToBudget({
+        messages: req.body.messages,
+        system: req.body?.system,
+        budget: promptBudget,
+      });
+      req.body.messages = pruneResult.messages;
+      currentTokens = pruneResult.afterTokens;
+      optimizationMeta.pruned = pruneResult.pruned;
+      optimizationMeta.prunedCount = pruneResult.prunedCount;
+      optimizationMeta.promptTokensAfterPrune = pruneResult.afterTokens;
+      optimizationMeta.promptTokensAfterSummary = pruneResult.afterTokens;
+      optimizationMeta.tokensSavedByPrune = Math.max(0, preEstimate - pruneResult.afterTokens);
+
+      if (summarizationEnabled && pruneResult.afterTokens > promptBudget && !req.__summaryAttempted) {
+        req.__summaryAttempted = true;
+        const summaryResult = summarizeMessagesToBudget({
+          messages: req.body.messages,
+          system: req.body?.system,
+          budget: promptBudget,
+        });
+
+        if (summaryResult.summarized) {
+          req.body.messages = summaryResult.messages;
+          currentTokens = summaryResult.afterTokens;
+          optimizationMeta.summarized = true;
+          optimizationMeta.summaryReplacedCount = summaryResult.replacedCount;
+          optimizationMeta.promptTokensAfterSummary = summaryResult.afterTokens;
+          optimizationMeta.tokensSavedBySummary = Math.max(0, pruneResult.afterTokens - summaryResult.afterTokens);
+        } else {
+          optimizationMeta.promptTokensAfterSummary = pruneResult.afterTokens;
+        }
+      }
+
+      delete req.__originalMessages;
+    } else {
+      optimizationMeta.promptTokensAfterPrune = preEstimate;
+      optimizationMeta.promptTokensAfterSummary = preEstimate;
+    }
+
+    optimizationMeta.promptTokensAfter = currentTokens;
   }
 
   // ── Short-Circuit: Serve /models locally from config ──────────────────────
+
+  const cacheEligible = cacheEnabled && req.method === 'POST' && isChatGenerationRequest(req) && req.body?.stream !== true;
+  optimizationMeta.cacheEligible = cacheEligible;
+
+  let cacheKey = null;
+  if (cacheEligible) {
+    const requestedForCache = req.body?.model || '';
+    const routedCacheUrl = config.model_routing && typeof config.model_routing === 'object'
+      ? (config.model_routing[requestedForCache] || Object.entries(config.model_routing).find(([key]) => requestedForCache.startsWith(key))?.[1])
+      : null;
+    const cacheProviderId = req.__currentProviderId
+      || (routedCacheUrl
+        ? (Array.isArray(config.providers) ? config.providers.find((p) => p.baseUrl && p.baseUrl.replace(/\/+$/, '') === routedCacheUrl.replace(/\/+$/, ''))?.id : null)
+        : null)
+      || config.active_provider_id
+      || 'active';
+
+    cacheKey = createCacheKey(req.body, userId, cacheProviderId);
+    const cached = readCachedResponse(responseCache, cacheKey);
+    if (cached) {
+      optimizationMeta.cacheHit = true;
+      await addLog({
+        method: req.method,
+        path: req.path,
+        model: requestedModel,
+        status: 200,
+        latencyMs: Date.now() - startTime,
+        promptTokens: cached.usage?.prompt_tokens || 0,
+        completionTokens: cached.usage?.completion_tokens || 0,
+        streaming: false,
+        provider: 'cache',
+        optimization: optimizationMeta,
+      }, userId, accessKey);
+      return res.status(200).json(cached);
+    }
+  } else {
+    optimizationMeta.cacheHit = false;
+  }
   if (req.method === 'GET' && req.path === '/models') {
     const modelList = Array.isArray(config.model_catalogs) 
       ? config.model_catalogs.reduce((acc, cat) => acc.concat(cat.models || []), [])
@@ -1022,16 +1160,51 @@ async function proxyRequest(req, res) {
     return res.json({ object: 'list', data });
   }
 
-  // ── Resolve Active Provider ────────────────────────────────────────────────
-  // The active_provider_id is the primary source, but auto-switch can override it.
+  // ── Client-Requested Provider Override ────────────────────────────────
+  // Allow clients to request a specific provider by ID or baseUrl match.
+  // The override is respected only when the requested provider is actually
+  // configured for this user. This lets the UI drive routing without
+  // bypassing the user's saved provider list.
+  const clientRequestedProviderId = req.body?.provider || req.query?.provider;
   const providers = Array.isArray(config.providers) ? config.providers : [];
+  const hasUsableProvider = (provider) => {
+    if (!provider || typeof provider !== 'object') return false;
+    const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
+    const hasApiKey = Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
+    return hasBaseUrl && hasApiKey;
+  };
 
   let providerToUseId = config.active_provider_id;
+
+  // req.__currentProviderId carries provider IDs set during auto-switch or
+  // fallback retries — those take precedence over everything so we never
+  // "undo" an automatic recovery decision.
   if (req.__currentProviderId) {
     providerToUseId = req.__currentProviderId;
+  } else if (clientRequestedProviderId) {
+    // Try to match by provider ID first, then by baseUrl suffix.
+    const matchById = providers.find(
+      (p) => p.id === clientRequestedProviderId
+    );
+    const matchByUrl = !matchById
+      ? providers.find(
+          (p) =>
+            p.baseUrl &&
+            p.baseUrl.replace(/\/+$/, '').endsWith(clientRequestedProviderId.replace(/\/+$/, ''))
+        )
+      : null;
+
+    if (matchById || matchByUrl) {
+      providerToUseId = (matchById || matchByUrl).id;
+    }
   }
 
-  const activeProvider = providers.find(p => p.id === providerToUseId) || providers[0];
+  const providerById = providers.find((p) => p.id === providerToUseId) || null;
+  const firstUsableProvider = providers.find(hasUsableProvider) || null;
+  const activeProvider = providerById && hasUsableProvider(providerById)
+    ? providerById
+    : (firstUsableProvider || providerById || providers[0] || null);
+  let upstreamProvider = activeProvider;
   const providerName = activeProvider ? activeProvider.name : 'unknown';
 
   if (!activeProvider) {
@@ -1067,7 +1240,7 @@ async function proxyRequest(req, res) {
   apiKey = apiKey || '';
 
   const maskedKey = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'none';
-  console.log(`[proxy] Active provider: ${activeProvider.name} (${baseUrl}) using key: ${maskedKey}`);
+  // console.log(`[proxy] Active provider: ${activeProvider.name} (${baseUrl}) using key: ${maskedKey}`);
 
   // ── Model Routing Override ─────────────────────────────────────────────────
   // If config.model_routing maps the requested model to a specific baseUrl,
@@ -1088,7 +1261,8 @@ async function proxyRequest(req, res) {
         (p) => p.baseUrl && (p.baseUrl.replace(/\/+$/, '') === routeUrl.replace(/\/+$/, ''))
       );
       baseUrl = routeUrl;
-      
+      upstreamProvider = routedProvider || activeProvider;
+
       if (routedProvider) {
         if (!req.__triedKeys[routedProvider.id]) req.__triedKeys[routedProvider.id] = new Set();
         apiKey = (routedProvider.apiKeys && routedProvider.apiKeys.length > 0)
@@ -1099,10 +1273,10 @@ async function proxyRequest(req, res) {
         apiKey = apiKey; // fall back to active key if not found
       }
 
-      console.log(
-        `[proxy] model_routing: "${requestedModelForRouting}" → ${routeUrl}` +
-        (routedProvider ? ` (${routedProvider.name})` : ' (key: inherited)')
-      );
+      // console.log(
+      //   `[proxy] model_routing: "${requestedModelForRouting}" → ${routeUrl}` +
+      //   (routedProvider ? ` (${routedProvider.name})` : ' (key: inherited)')
+      // );
     }
   }
 
@@ -1141,7 +1315,7 @@ async function proxyRequest(req, res) {
   if (config.model_mapping && config.model_mapping[targetModel]) {
     targetModel = config.model_mapping[targetModel];
     if (req.body) req.body.model = targetModel;
-    console.log(`[proxy] Mapping: ${originalModel} → ${targetModel}`);
+    // console.log(`[proxy] Mapping: ${originalModel} → ${targetModel}`);
   }
 
   // ── EcomAgent early model normalisation ───────────────────────────────────
@@ -1161,7 +1335,7 @@ async function proxyRequest(req, res) {
       .replace(/claude-3-[\w.-]+-opus[\w.-]*/g, 'claude-opus-4.6');
     targetModel = req.body.model;
     if (preEcom !== req.body.model) {
-      console.log(`[proxy] EcomAgent early remap: ${preEcom} → ${req.body.model}`);
+      // console.log(`[proxy] EcomAgent early remap: ${preEcom} → ${req.body.model}`);
     }
   }
 
@@ -1238,7 +1412,7 @@ async function proxyRequest(req, res) {
   // ── Optional Stub: short-circuit selected models when explicitly configured ──
   const stubModels = Array.isArray(config.stub_models) ? config.stub_models : [];
   if (stubModels.includes(targetModel)) {
-    console.log(`[proxy] STUB ACTIVE: Short-circuiting background request for: ${targetModel}`);
+    // console.log(`[proxy] STUB ACTIVE: Short-circuiting background request for: ${targetModel}`);
     const stubData = {
       id: `stub_${Math.random().toString(36).slice(2, 11)}`,
       type: 'message',
@@ -1272,7 +1446,7 @@ async function proxyRequest(req, res) {
 
     const upstreamRes = await axios(axiosConfig);
 
-    console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
+    // console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
 
     // Debug: capture and log non-2xx body from upstream
     if (upstreamRes.status >= 400) {
@@ -1400,6 +1574,7 @@ async function proxyRequest(req, res) {
         anthropicTranslator.finish();
       }
 
+      let bufferedBody = null;
       if (shouldBuffer) {
         let finalBody = rawBody;
         let contentType = upstreamRes.headers['content-type'] || 'application/json';
@@ -1410,11 +1585,11 @@ async function proxyRequest(req, res) {
             const parsed = JSON.parse(rawBody);
             let modelList = Array.isArray(parsed) ? parsed : (parsed.data || []);
             modelList = modelList.filter(m => m !== null);
-            
-            const customModels = Array.isArray(config.model_catalogs) 
+
+            const customModels = Array.isArray(config.model_catalogs)
               ? config.model_catalogs.reduce((acc, cat) => acc.concat(cat.models || []), [])
               : [];
-            
+
             if (customModels.length > 0) {
               modelList = [...modelList, ...customModels];
             }
@@ -1428,9 +1603,8 @@ async function proxyRequest(req, res) {
         if (isMessages) {
           try {
             const parsed = JSON.parse(rawBody);
-            // If it looks like OpenAI format (has 'choices')
             if (parsed.choices && Array.isArray(parsed.choices)) {
-              console.log('[proxy] Translating non-streaming OpenAI response to Anthropic format');
+              // console.log('[proxy] Translating non-streaming OpenAI response to Anthropic format');
               const translated = translateOpenAIToAnthropic(parsed, requestedModel);
               finalBody = JSON.stringify(translated);
             }
@@ -1439,7 +1613,12 @@ async function proxyRequest(req, res) {
           }
         }
 
-        // Now send status, headers and body for buffered response
+        try {
+          bufferedBody = JSON.parse(finalBody);
+        } catch {
+          bufferedBody = null;
+        }
+
         res.status(upstreamRes.status);
         const forwardHeaders = ['content-type', 'cache-control', 'x-request-id'];
         forwardHeaders.forEach((h) => {
@@ -1452,13 +1631,10 @@ async function proxyRequest(req, res) {
 
       res.end();
 
-
-      // Parse token usage from the last SSE chunk or JSON body
       let promptTokens = 0;
       let completionTokens = 0;
       try {
         if (isStreaming) {
-          // Extract usage from the final "[DONE]" chunk
           const lines = rawBody.split('\n');
           for (const line of lines) {
             if (line.startsWith('data:') && !line.includes('[DONE]')) {
@@ -1470,15 +1646,20 @@ async function proxyRequest(req, res) {
             }
           }
         } else {
-          const json = JSON.parse(rawBody);
-          promptTokens = json.usage?.prompt_tokens || 0;
-          completionTokens = json.usage?.completion_tokens || 0;
+          const json = bufferedBody || JSON.parse(rawBody);
+          promptTokens = json.usage?.prompt_tokens || json.usage?.input_tokens || 0;
+          completionTokens = json.usage?.completion_tokens || json.usage?.output_tokens || 0;
         }
       } catch {
         // Usage parse is best-effort
       }
 
+      if (cacheEligible && !optimizationMeta.cacheHit && cacheKey && shouldBuffer && upstreamRes.status < 400 && bufferedBody) {
+        storeCachedResponse(responseCache, cacheKey, bufferedBody, cacheTtlSeconds * 1000, RESPONSE_CACHE_MAX_ENTRIES);
+      }
+
       await addLog({
+        optimization: optimizationMeta,
         method: req.method,
         path: req.path,
         model: targetModel,
@@ -1502,6 +1683,7 @@ async function proxyRequest(req, res) {
         streaming: isStreaming,
         provider: providerName,
         error: err.message,
+        optimization: optimizationMeta,
       }, userId, accessKey);
       if (!res.headersSent) {
         if (req.path.includes('/messages')) {
@@ -1530,7 +1712,7 @@ async function proxyRequest(req, res) {
     });
 
     upstreamRes.data.on('close', () => {
-      console.log('[proxy] Upstream connection closed');
+      // console.log('[proxy] Upstream connection closed');
     });
 
   } catch (err) {
@@ -1625,24 +1807,26 @@ async function proxyRequest(req, res) {
 
     // 0. Rate Limit Failover: Switch to next API key if available
     if (status === 429) {
-      // Determine which provider was used (active or routed)
       const currentProvider = providers.find(p => p.baseUrl && (baseUrl.replace(/\/+$/, '') === p.baseUrl.replace(/\/+$/, ''))) || activeProvider;
-      
-      if (!req.__triedKeys) req.__triedKeys = {};
-      if (!req.__triedKeys[currentProvider.id]) req.__triedKeys[currentProvider.id] = new Set();
-      req.__triedKeys[currentProvider.id].add(apiKey);
+      if (!currentProvider?.id) {
+        console.warn('[proxy] Rate limit handling skipped: no current provider context available.');
+      } else {
+        if (!req.__triedKeys) req.__triedKeys = {};
+        if (!req.__triedKeys[currentProvider.id]) req.__triedKeys[currentProvider.id] = new Set();
+        req.__triedKeys[currentProvider.id].add(apiKey);
 
-      const nextKey = currentProvider.apiKeys?.find(k => !req.__triedKeys[currentProvider.id].has(k));
-      if (nextKey) {
-        if (!canRetry(req)) {
-          console.warn(`[proxy] Rate-limit key-rotation retry skipped: attempt budget exhausted${attemptLabel(req)}`);
-        } else {
-          const maskedNextKey = `${nextKey.slice(0, 8)}...${nextKey.slice(-4)}`;
-          console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; retrying with next API key: ${maskedNextKey}${attemptLabel(req)}`);
-          return proxyRequest(req, res);
+        const nextKey = currentProvider.apiKeys?.find(k => !req.__triedKeys[currentProvider.id].has(k));
+        if (nextKey) {
+          if (!canRetry(req)) {
+            console.warn(`[proxy] Rate-limit key-rotation retry skipped: attempt budget exhausted${attemptLabel(req)}`);
+          } else {
+            const maskedNextKey = `${nextKey.slice(0, 8)}...${nextKey.slice(-4)}`;
+            console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; retrying with next API key: ${maskedNextKey}${attemptLabel(req)}`);
+            return proxyRequest(req, res);
+          }
         }
+        console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; no more keys available.`);
       }
-      console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; no more keys available.`);
     }
 
     if (isModelUnavailable && req.body && req.body.model) {
@@ -1650,15 +1834,21 @@ async function proxyRequest(req, res) {
 
       // 1. Auto Provider Switch: Try other providers for the SAME model first
       if (!req.__triedProviders) req.__triedProviders = new Set();
-      req.__triedProviders.add(activeProvider.id);
+      const failedProvider = upstreamProvider || activeProvider;
+      if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
 
-      const nextProvider = providers.find(p => (p.apiKey || (p.apiKeys && p.apiKeys.length > 0)) && !req.__triedProviders.has(p.id));
+      const nextProvider = providers.find((p) => {
+        const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
+        const hasKey = p.apiKey || (p.apiKeys && p.apiKeys.length > 0);
+        const isSameProvider = failedProvider?.id && p.id === failedProvider.id;
+        return hasBaseUrl && hasKey && !isSameProvider && !req.__triedProviders.has(p.id);
+      });
       
       if (nextProvider) {
         if (!canRetry(req)) {
           console.warn(`[proxy] Provider auto-switch retry skipped: attempt budget exhausted${attemptLabel(req)}`);
         } else {
-          console.warn(`[proxy] Model ${blockedModel} unavailable on ${activeProvider.name}; auto-switching to ${nextProvider.name}${attemptLabel(req)}`);
+          console.warn(`[proxy] Model ${blockedModel} unavailable on ${failedProvider?.name || activeProvider.name}; auto-switching to ${nextProvider.name}${attemptLabel(req)}`);
           req.__currentProviderId = nextProvider.id;
           // Keep the original requested model for the next provider
           return proxyRequest(req, res);
@@ -1693,6 +1883,7 @@ async function proxyRequest(req, res) {
       streaming: isStreaming,
       provider: providerName,
       error: message,
+      optimization: optimizationMeta,
     }, userId, accessKey);
 
     if (!res.headersSent) {

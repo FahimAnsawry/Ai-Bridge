@@ -34,6 +34,11 @@ const DEFAULTS = {
   stub_models: [],
   request_minimization_enabled: true,
   chat_max_upstream_attempts: 4,
+  token_optimization_enabled: false,
+  prompt_budget_tokens: 0,
+  token_summarization_enabled: false,
+  response_cache_enabled: false,
+  response_cache_ttl_seconds: 30,
   active_provider_id: 'swiftrouter',
   providers: [
     {
@@ -49,9 +54,32 @@ const DEFAULTS = {
       baseUrl: 'https://api.ecomagent.in/v1',
       apiKey: '',
       isActive: true
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama (Local)',
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: 'ollama',
+      isActive: true
+    },
+    {
+      id: 'ollama-cloud',
+      name: 'Ollama Cloud',
+      baseUrl: 'https://ollama.com/api',
+      apiKey: '05a314ff0a324ccf856e506aa12d93fc.-dMUQ2QAVRtpN3BRD7WfHF6e',  // Set this to your key from https://ollama.com/settings/keys
+      isActive: true
     }
   ]
 };
+
+function normalizeActiveProviderId(providers, activeProviderId) {
+  const list = Array.isArray(providers) ? providers : [];
+  if (list.length === 0) return null;
+  if (activeProviderId && list.some((p) => p.id === activeProviderId)) {
+    return activeProviderId;
+  }
+  return list[0].id || null;
+}
 
 /**
  * Load global config
@@ -89,13 +117,18 @@ async function loadConfig(userId) {
       stub_models: DEFAULTS.stub_models,
       request_minimization_enabled: DEFAULTS.request_minimization_enabled,
       chat_max_upstream_attempts: DEFAULTS.chat_max_upstream_attempts,
+      token_optimization_enabled: DEFAULTS.token_optimization_enabled,
+      prompt_budget_tokens: DEFAULTS.prompt_budget_tokens,
+      token_summarization_enabled: DEFAULTS.token_summarization_enabled,
+      response_cache_enabled: DEFAULTS.response_cache_enabled,
+      response_cache_ttl_seconds: DEFAULTS.response_cache_ttl_seconds,
       providers: DEFAULTS.providers,
       model_catalogs: [],
     };
   }
 
   const uId = new mongoose.Types.ObjectId(userId.toString());
-  
+
   // Fetch everything in parallel
   const [user, userConfig, catalogs, providerDocs] = await Promise.all([
     User.findById(uId),
@@ -110,37 +143,44 @@ async function loadConfig(userId) {
 
   // Determine which config to use (prefer UserConfig if it exists)
   const cfg = userConfig || user.config || {};
-  
-  const modelMapping = cfg.modelMapping 
+
+  const modelMapping = cfg.modelMapping
     ? (cfg.modelMapping instanceof Map ? Object.fromEntries(cfg.modelMapping) : cfg.modelMapping)
     : { ...DEFAULTS.model_mapping };
+
+  const providers = providerDocs.length > 0
+    ? providerDocs.map(p => ({
+      id: p.providerId,
+      name: p.name,
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey,
+      apiKeys: p.apiKeys && p.apiKeys.length > 0 ? p.apiKeys : (p.apiKey ? [p.apiKey] : []),
+      isActive: p.isActive
+    }))
+    : (user.providers || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey,
+      apiKeys: p.apiKeys && p.apiKeys.length > 0 ? p.apiKeys : (p.apiKey ? [p.apiKey] : []),
+      isActive: p.isActive
+    }));
 
   const config = {
     port: cfg.port || user.config?.port || DEFAULTS.port,
     cors_origins: cfg.corsOrigins?.length ? cfg.corsOrigins : (user.config?.corsOrigins?.length ? user.config.corsOrigins : DEFAULTS.cors_origins),
     model_routing: cfg.modelRouting || user.config?.modelRouting || DEFAULTS.model_routing,
-    active_provider_id: cfg.activeProviderId || user.activeProviderId || null,
+    active_provider_id: normalizeActiveProviderId(providers, cfg.activeProviderId || user.activeProviderId || null),
     model_mapping: modelMapping,
     stub_models: cfg.stubModels || user.config?.stubModels || [],
     request_minimization_enabled: cfg.requestMinimizationEnabled ?? user.config?.requestMinimizationEnabled ?? DEFAULTS.request_minimization_enabled,
     chat_max_upstream_attempts: cfg.chatMaxUpstreamAttempts ?? user.config?.chatMaxUpstreamAttempts ?? DEFAULTS.chat_max_upstream_attempts,
-    providers: providerDocs.length > 0
-      ? providerDocs.map(p => ({
-          id: p.providerId,
-          name: p.name,
-          baseUrl: p.baseUrl,
-          apiKey: p.apiKey,
-          apiKeys: p.apiKeys && p.apiKeys.length > 0 ? p.apiKeys : (p.apiKey ? [p.apiKey] : []),
-          isActive: p.isActive
-        }))
-      : (user.providers || []).map(p => ({
-          id: p.id,
-          name: p.name,
-          baseUrl: p.baseUrl,
-          apiKey: p.apiKey,
-          apiKeys: p.apiKeys && p.apiKeys.length > 0 ? p.apiKeys : (p.apiKey ? [p.apiKey] : []),
-          isActive: p.isActive
-        })),
+    token_optimization_enabled: cfg.tokenOptimizationEnabled ?? user.config?.tokenOptimizationEnabled ?? DEFAULTS.token_optimization_enabled,
+    prompt_budget_tokens: cfg.promptBudgetTokens ?? user.config?.promptBudgetTokens ?? DEFAULTS.prompt_budget_tokens,
+    token_summarization_enabled: cfg.tokenSummarizationEnabled ?? user.config?.tokenSummarizationEnabled ?? DEFAULTS.token_summarization_enabled,
+    response_cache_enabled: cfg.responseCacheEnabled ?? user.config?.responseCacheEnabled ?? DEFAULTS.response_cache_enabled,
+    response_cache_ttl_seconds: cfg.responseCacheTtlSeconds ?? user.config?.responseCacheTtlSeconds ?? DEFAULTS.response_cache_ttl_seconds,
+    providers,
     model_catalogs: catalogs
   };
 
@@ -189,6 +229,12 @@ async function saveConfig(userId, updates) {
     }));
     if (syncOps.length > 0) await Provider.bulkWrite(syncOps);
 
+    const providerIds = updates.providers.map((p) => p.id);
+    await Provider.deleteMany({
+      userId: uId,
+      providerId: { $nin: providerIds }
+    });
+
     // Also keep in User document for backward compatibility
     user.providers = updates.providers.map(p => {
       const apiKeys = Array.isArray(p.apiKeys) ? p.apiKeys : (p.apiKey ? [p.apiKey] : []);
@@ -204,6 +250,8 @@ async function saveConfig(userId, updates) {
       };
     });
   }
+
+  user.activeProviderId = normalizeActiveProviderId(user.providers || [], user.activeProviderId);
   await user.save();
 
   // 2. Update/Create UserConfig document (for specific settings)
@@ -226,6 +274,27 @@ async function saveConfig(userId, updates) {
     configUpdates.chatMaxUpstreamAttempts = Number.isFinite(parsedAttempts) && parsedAttempts >= 1
       ? Math.floor(parsedAttempts)
       : DEFAULTS.chat_max_upstream_attempts;
+  }
+  if (updates.token_optimization_enabled !== undefined) {
+    configUpdates.tokenOptimizationEnabled = !!updates.token_optimization_enabled;
+  }
+  if (updates.prompt_budget_tokens !== undefined) {
+    const parsedBudget = Number(updates.prompt_budget_tokens);
+    configUpdates.promptBudgetTokens = Number.isFinite(parsedBudget) && parsedBudget >= 0
+      ? Math.floor(parsedBudget)
+      : DEFAULTS.prompt_budget_tokens;
+  }
+  if (updates.token_summarization_enabled !== undefined) {
+    configUpdates.tokenSummarizationEnabled = !!updates.token_summarization_enabled;
+  }
+  if (updates.response_cache_enabled !== undefined) {
+    configUpdates.responseCacheEnabled = !!updates.response_cache_enabled;
+  }
+  if (updates.response_cache_ttl_seconds !== undefined) {
+    const parsedTtl = Number(updates.response_cache_ttl_seconds);
+    configUpdates.responseCacheTtlSeconds = Number.isFinite(parsedTtl) && parsedTtl > 0
+      ? Math.floor(parsedTtl)
+      : DEFAULTS.response_cache_ttl_seconds;
   }
 
   await UserConfig.findOneAndUpdate(

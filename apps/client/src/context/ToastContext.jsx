@@ -16,12 +16,12 @@ export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
 
   const showToast = useCallback((message, type = 'info', duration = 3000) => {
-    console.log('Showing toast:', message, type);
+    // console.log('Showing toast:', message, type);
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
 
     setTimeout(() => {
-      console.log('Hiding toast:', id);
+      // console.log('Hiding toast:', id);
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, duration);
   }, []);

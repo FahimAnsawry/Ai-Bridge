@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
   Box,
   Zap,
   AlertCircle,
+  RefreshCw,
+  Server,
+  TrendingUp,
+  Shield,
+  Clock,
+  CheckCircle2,
 } from 'lucide-react';
 import { fetchStatus, fetchLogs } from '../api';
 import PageHeader from '../components/dashboard/PageHeader';
@@ -197,7 +203,7 @@ const Overview = ({ user }) => {
             <div className="flex flex-col">
               <span className="text-[10px] font-bold uppercase tracking-[0.15em] leading-none mb-1 text-[--color-text-tertiary]">Tokens</span>
               <span className="text-sm font-black leading-none" style={{ background: GRADIENTS.rose, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                {status?.avgLatencyMs != null ? `${((status.avgLatencyMs * status.totalRequests) / 1000000).toFixed(2)}M` : '0'}
+                {status?.totalTokens != null ? `${(status.totalTokens / 1000000).toFixed(2)}M` : '0'}
               </span>
             </div>
           </div>
@@ -255,19 +261,11 @@ const Overview = ({ user }) => {
               />
               <KPICard
                 title="Token Consumption"
-                value={status?.avgLatencyMs != null ? `${((status.avgLatencyMs * status.totalRequests) / 1000000).toFixed(2)}M` : '0'}
+                value={status?.totalTokens != null ? `${(status.totalTokens / 1000000).toFixed(2)}M` : '0'}
                 icon={<Zap size={16} />}
                 gradient={GRADIENTS.emerald}
                 glowColor={GLOWS.emerald}
                 delay={0.1}
-              />
-              <KPICard
-                title="Active Models"
-                value={status?.activeModels ?? '0'}
-                icon={<Box size={16} />}
-                gradient={GRADIENTS.violet}
-                glowColor={GLOWS.violet}
-                delay={0.2}
               />
 
             </div>

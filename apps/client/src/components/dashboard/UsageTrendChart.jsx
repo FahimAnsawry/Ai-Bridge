@@ -107,11 +107,11 @@ const UsageTrendChart = ({ data = [], logs = [], loading = false }) => {
   if (loading) {
     return (
       <div
-        className="relative p-6 rounded-2xl overflow-hidden"
+        className="relative p-5 rounded-2xl overflow-hidden"
         style={{
           background: 'var(--color-bg-panel)',
           border: '1px solid var(--color-glass-border)',
-          height: 380,
+          height: 330,
         }}
       />
     );
@@ -122,7 +122,7 @@ const UsageTrendChart = ({ data = [], logs = [], loading = false }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.2 }}
-      className="relative p-6 rounded-2xl overflow-hidden"
+      className="relative p-5 rounded-2xl overflow-hidden"
       style={{
         background: 'var(--color-bg-panel)',
         border: '1px solid var(--color-glass-border)',
@@ -130,7 +130,7 @@ const UsageTrendChart = ({ data = [], logs = [], loading = false }) => {
     >
       <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: GRADIENTS.indigo }} />
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3.5">
         <div>
           <h3 className="text-base font-bold text-[--color-text-primary]">Usage Trends</h3>
           <p className="text-xs font-medium text-[--color-text-tertiary] mt-0.5">
@@ -164,7 +164,7 @@ const UsageTrendChart = ({ data = [], logs = [], loading = false }) => {
       </div>
 
       {chartData.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="flex flex-col items-center justify-center py-12 gap-3">
           <div
             className="h-14 w-14 rounded-2xl flex items-center justify-center"
             style={{
@@ -179,7 +179,7 @@ const UsageTrendChart = ({ data = [], logs = [], loading = false }) => {
           </p>
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={320}>
+        <ResponsiveContainer width="100%" height={280}>
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="gradientRequests" x1="0" y1="0" x2="0" y2="1">

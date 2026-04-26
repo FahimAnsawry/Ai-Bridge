@@ -235,14 +235,21 @@ async function syncSwiftRouterModels(userId, options = {}) {
     // Update modelMapping in user config with identity mappings for new models
     const userConfig = await UserConfig.findOne({ userId });
     if (userConfig) {
+      const currentMapping = userConfig.modelMapping;
+      const mappingAsObject = currentMapping instanceof Map
+        ? Object.fromEntries(currentMapping)
+        : (currentMapping && typeof currentMapping === 'object' ? { ...currentMapping } : {});
+
       let mappingUpdated = false;
       for (const m of normalizedModels) {
-        if (!userConfig.modelMapping.has(m.id)) {
-          userConfig.modelMapping.set(m.id, m.id);
+        if (!mappingAsObject[m.id]) {
+          mappingAsObject[m.id] = m.id;
           mappingUpdated = true;
         }
       }
+
       if (mappingUpdated) {
+        userConfig.modelMapping = mappingAsObject;
         await userConfig.save();
       }
     }
