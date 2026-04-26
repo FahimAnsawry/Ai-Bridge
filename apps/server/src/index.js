@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); // Load 
 require('./config/db'); // Connect to MongoDB
 const express = require('express');
 const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const { Server: SocketIOServer } = require('socket.io');
 
 const { loadConfig } = require('./config/config');
@@ -20,12 +21,24 @@ function createWebServer(options = {}) {
   });
   const app = express();
 
-  // Session middleware
+  const isProduction = process.env.NODE_ENV === 'production';
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-proxy';
+
+  // Session middleware — use MongoStore so sessions survive Vercel cold starts
   app.use(session({
     secret: process.env.SESSION_SECRET || 'fallback-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === 'production' }
+    store: MongoStore.create({
+      mongoUrl: mongoUri,
+      collectionName: 'sessions',
+      ttl: 7 * 24 * 60 * 60, // 7 days
+    }),
+    cookie: {
+      secure: isProduction,           // HTTPS only in prod
+      sameSite: isProduction ? 'none' : 'lax', // 'none' needed for OAuth redirect chain
+      maxAge: 7 * 24 * 60 * 60 * 1000,         // 7 days in ms
+    },
   }));
 
   // Parse JSON bodies
