@@ -3,7 +3,8 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); // Load 
 require('./config/db'); // Connect to MongoDB
 const express = require('express');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
+const _connectMongo = require('connect-mongo');
+const MongoStore = _connectMongo.default || _connectMongo; // ESM/CJS interop
 const { Server: SocketIOServer } = require('socket.io');
 
 const { loadConfig } = require('./config/config');
