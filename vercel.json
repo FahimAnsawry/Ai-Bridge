@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index.js" },
+    { "source": "/v1/:path*", "destination": "/api/index.js" },
+    { "source": "/auth/:path*", "destination": "/api/index.js" },
+    { "source": "/socket.io/:path*", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/api/index.js" }
+  ]
+}

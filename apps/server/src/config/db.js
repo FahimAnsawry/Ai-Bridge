@@ -10,7 +10,7 @@ mongoose.connect(uri, {
   serverSelectionTimeoutMS: 5000, // Shorter timeout for faster failover
 })
   .then(async () => {
-    console.log(`Connected to MongoDB`);
+    // console.log(`Connected to MongoDB`);
   })
   .catch((err) => {
     console.error('MongoDB connection error (server will continue without DB):', err.message);

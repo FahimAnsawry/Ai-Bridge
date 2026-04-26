@@ -7,6 +7,8 @@
     "start": "node apps/server/src/index.js",
     "client": "npm run dev --prefix apps/client",
     "dev": "concurrently \"npm run start\" \"npm run client\"",
+    "vercel-build": "npm install --prefix apps/client && npm run build --prefix apps/client",
+    "build": "npm run vercel-build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

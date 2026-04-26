@@ -13,7 +13,11 @@ const passport = require('./config/passport');
 const { requireAuth } = require('./middlewares/auth-middleware');
 
 function createWebServer(options = {}) {
-  const runtime = options.runtime || createProxyRuntime({ host: options.host || '127.0.0.1', userId: options.userId || 'default' });
+  const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+  const runtime = options.runtime || createProxyRuntime({ 
+    host: options.host || '127.0.0.1', 
+    userId: options.userId || 'default' 
+  });
   const app = express();
 
   // Session middleware
@@ -61,6 +65,12 @@ function createWebServer(options = {}) {
 
   // Protected Dashboard API
   app.use('/api', requireAuth, createDashboardRouter(runtime));
+
+  // Mount Proxy V1 directly if on Vercel (since we can't start a second server)
+  if (isVercel) {
+    const v1Router = require('./routes/v1');
+    app.use('/v1', v1Router);
+  }
 
   const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
   app.use(express.static(CLIENT_DIST));
@@ -126,17 +136,17 @@ async function startStandaloneServer() {
   attachSocketIO(io);
 
   io.on('connection', (socket) => {
-    console.log(`[socket.io] client connected   (${socket.id})`);
+    // console.log(`[socket.io] client connected   (${socket.id})`);
     socket.on('join', (userId) => {
       if (userId) {
         const room = `user_${userId}`;
         socket.join(room);
-        console.log(`[socket.io] client ${socket.id} joined room ${room}`);
+        // console.log(`[socket.io] client ${socket.id} joined room ${room}`);
       }
     });
 
     socket.on('disconnect', () => {
-      console.log(`[socket.io] client disconnected (${socket.id})`);
+      // console.log(`[socket.io] client disconnected (${socket.id})`);
     });
   });
 
