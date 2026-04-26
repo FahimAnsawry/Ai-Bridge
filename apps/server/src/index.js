@@ -22,6 +22,11 @@ function createWebServer(options = {}) {
   });
   const app = express();
 
+  // Trust Vercel's reverse proxy so secure cookies work over HTTPS
+  if (isVercel || process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+  }
+
   const isProduction = process.env.NODE_ENV === 'production';
   const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-proxy';
 
@@ -36,9 +41,9 @@ function createWebServer(options = {}) {
       ttl: 7 * 24 * 60 * 60, // 7 days
     }),
     cookie: {
-      secure: isProduction,           // HTTPS only in prod
-      sameSite: isProduction ? 'none' : 'lax', // 'none' needed for OAuth redirect chain
-      maxAge: 7 * 24 * 60 * 60 * 1000,         // 7 days in ms
+      secure: isProduction,      // HTTPS only in prod (works because trust proxy is set)
+      sameSite: 'lax',           // 'lax' is fine for same-origin OAuth on Vercel
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
     },
   }));
 

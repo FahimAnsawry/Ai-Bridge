@@ -19,7 +19,7 @@ async function handleResponse(res) {
 
 /** GET /auth/status */
 export async function fetchAuthStatus() {
-  const res = await fetch(`/auth/status`);
+  const res = await fetch(`/auth/status`, { credentials: 'include' });
   return res.json();
 }
 
