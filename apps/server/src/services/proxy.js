@@ -789,8 +789,12 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   // Normalization: Map Anthropic's /messages to OpenAI's /chat/completions if upstream is not Anthropic
   const isAnthropic = baseUrl.includes('anthropic.com');
   const isEcom = baseUrl.includes('ecom');
+  const isCopilotBridge = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
+  if (isCopilotBridge) {
+    headers['x-ai-bridge-upstream-hop'] = '1';
+  }
 
-  if (upstreamPath.endsWith('/messages') && !isAnthropic) {
+  if (upstreamPath.endsWith('/messages') && !isAnthropic && !isCopilotBridge) {
     // console.log(`[proxy] Mapping /messages → /chat/completions for ${isEcom ? 'ecom' : 'OpenAI-compatible'} upstream`);
     upstreamPath = upstreamPath.replace('/messages', '/chat/completions');
   }
@@ -995,18 +999,29 @@ async function proxyRequest(req, res) {
   const startTime = Date.now();
   const userId = req.user ? req.user._id : null;
   const accessKey = req.user ? req.user.accessKey : null;
+  const timing = {
+    authMs: Number.isFinite(req.__authTimingMs) ? req.__authTimingMs : null,
+    authCacheHit: req.__authCacheHit === true,
+    configMs: null,
+    requestBuildMs: null,
+    upstreamHeadersMs: null,
+    firstChunkMs: null,
+    streamDrainMs: null,
+  };
 
   if (!userId) {
     return res.status(401).json({ error: 'Unauthorized: missing user context' });
   }
 
-  const config = await loadConfig(userId);
+  const configStart = Date.now();
+  const config = await loadConfig(userId, { includeCatalogs: req.path === '/models' });
+  timing.configMs = Date.now() - configStart;
   const attemptState = initializeAttemptState(req, config);
   const requestedModel = req.body?.model || 'unknown';
 
-  const optimizationEnabled = true;
+  const optimizationEnabled = config.token_optimization_enabled === true;
   const promptBudget = Number(config.prompt_budget_tokens) > 0 ? Number(config.prompt_budget_tokens) : 12000;
-  const summarizationEnabled = true;
+  const summarizationEnabled = config.token_summarization_enabled === true;
   const cacheEnabled = config.response_cache_enabled === true;
   const cacheTtlSeconds = Number(config.response_cache_ttl_seconds) > 0 ? Number(config.response_cache_ttl_seconds) : 30;
   const shouldOptimizePrompt = optimizationEnabled && isChatGenerationRequest(req) && req.body && Array.isArray(req.body.messages);
@@ -1111,6 +1126,9 @@ async function proxyRequest(req, res) {
 
   const cacheEligible = cacheEnabled && req.method === 'POST' && isChatGenerationRequest(req) && req.body?.stream !== true;
   optimizationMeta.cacheEligible = cacheEligible;
+  const configuredProviders = Array.isArray(config.providers) ? config.providers : [];
+  const selectedProvidersForCache = configuredProviders.filter((p) => p?.isActive !== false);
+  const eligibleProvidersForCache = selectedProvidersForCache;
 
   let cacheKey = null;
   if (cacheEligible) {
@@ -1120,7 +1138,7 @@ async function proxyRequest(req, res) {
       : null;
     const cacheProviderId = req.__currentProviderId
       || (routedCacheUrl
-        ? (Array.isArray(config.providers) ? config.providers.find((p) => p.baseUrl && p.baseUrl.replace(/\/+$/, '') === routedCacheUrl.replace(/\/+$/, ''))?.id : null)
+        ? eligibleProvidersForCache.find((p) => p.baseUrl && p.baseUrl.replace(/\/+$/, '') === routedCacheUrl.replace(/\/+$/, ''))?.id
         : null)
       || config.active_provider_id
       || 'active';
@@ -1140,6 +1158,7 @@ async function proxyRequest(req, res) {
         streaming: false,
         provider: 'cache',
         optimization: optimizationMeta,
+        performance: timing,
       }, userId, accessKey);
       return res.status(200).json(cached);
     }
@@ -1166,7 +1185,9 @@ async function proxyRequest(req, res) {
   // configured for this user. This lets the UI drive routing without
   // bypassing the user's saved provider list.
   const clientRequestedProviderId = req.body?.provider || req.query?.provider;
-  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const providers = configuredProviders;
+  const selectedProviders = providers.filter((p) => p?.isActive !== false);
+  const eligibleProviders = selectedProviders;
   const hasUsableProvider = (provider) => {
     if (!provider || typeof provider !== 'object') return false;
     const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
@@ -1183,11 +1204,11 @@ async function proxyRequest(req, res) {
     providerToUseId = req.__currentProviderId;
   } else if (clientRequestedProviderId) {
     // Try to match by provider ID first, then by baseUrl suffix.
-    const matchById = providers.find(
+    const matchById = eligibleProviders.find(
       (p) => p.id === clientRequestedProviderId
     );
     const matchByUrl = !matchById
-      ? providers.find(
+      ? eligibleProviders.find(
           (p) =>
             p.baseUrl &&
             p.baseUrl.replace(/\/+$/, '').endsWith(clientRequestedProviderId.replace(/\/+$/, ''))
@@ -1199,13 +1220,13 @@ async function proxyRequest(req, res) {
     }
   }
 
-  const providerById = providers.find((p) => p.id === providerToUseId) || null;
-  const firstUsableProvider = providers.find(hasUsableProvider) || null;
+  const providerById = eligibleProviders.find((p) => p.id === providerToUseId) || null;
+  const firstUsableProvider = eligibleProviders.find(hasUsableProvider) || null;
   const activeProvider = providerById && hasUsableProvider(providerById)
     ? providerById
-    : (firstUsableProvider || providerById || providers[0] || null);
+    : (firstUsableProvider || providerById || eligibleProviders[0] || null);
   let upstreamProvider = activeProvider;
-  const providerName = activeProvider ? activeProvider.name : 'unknown';
+  let providerName = activeProvider ? activeProvider.name : 'unknown';
 
   if (!activeProvider) {
     if (req.path.includes('/messages')) {
@@ -1257,20 +1278,21 @@ async function proxyRequest(req, res) {
 
     if (routeUrl) {
       // Find the provider whose baseUrl matches so we can get its apiKey
-      const routedProvider = providers.find(
+      const routedProvider = eligibleProviders.find(
         (p) => p.baseUrl && (p.baseUrl.replace(/\/+$/, '') === routeUrl.replace(/\/+$/, ''))
       );
-      baseUrl = routeUrl;
-      upstreamProvider = routedProvider || activeProvider;
+      if (!routedProvider) {
+        // Ignore model routes targeting providers that are not selected for this user.
+      } else {
+        baseUrl = routeUrl;
+        upstreamProvider = routedProvider;
+        providerName = routedProvider.name || routedProvider.id || providerName;
 
-      if (routedProvider) {
         if (!req.__triedKeys[routedProvider.id]) req.__triedKeys[routedProvider.id] = new Set();
         apiKey = (routedProvider.apiKeys && routedProvider.apiKeys.length > 0)
           ? routedProvider.apiKeys.find(k => !req.__triedKeys[routedProvider.id].has(k))
           : routedProvider.apiKey;
         if (!apiKey && routedProvider.apiKey) apiKey = routedProvider.apiKey;
-      } else {
-        apiKey = apiKey; // fall back to active key if not found
       }
 
       // console.log(
@@ -1312,7 +1334,8 @@ async function proxyRequest(req, res) {
   }
 
   const originalModel = targetModel;
-  if (config.model_mapping && config.model_mapping[targetModel]) {
+  const isCopilotProvider = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
+  if (!isCopilotProvider && config.model_mapping && config.model_mapping[targetModel]) {
     targetModel = config.model_mapping[targetModel];
     if (req.body) req.body.model = targetModel;
     // console.log(`[proxy] Mapping: ${originalModel} → ${targetModel}`);
@@ -1350,19 +1373,24 @@ async function proxyRequest(req, res) {
         : [];
 
     const isClaudeRequest = String(requestedModel || blockedModel || '').toLowerCase().startsWith('claude');
+    const defaultFallbackModel = 'claude-haiku-4.5';
 
     const claudeCandidates = [
+      defaultFallbackModel,
+      'claude-haiku-4-5-20251001',
       'claude-opus-4-7',
       'claude-opus-4-6',
       'claude-sonnet-4-6',
       'claude-3-7-sonnet-20250219',
       'claude-3-5-sonnet-20241022',
-      'claude-haiku-4-5-20251001',
     ];
 
     const candidates = isClaudeRequest
       ? [
           requestedModel,
+          defaultFallbackModel,
+          mapping[defaultFallbackModel],
+          mapping['claude-haiku-4-5-20251001'],
           ...claudeCandidates,
           mapping[requestedModel],
           mapping['claude-opus-4-7'],
@@ -1370,12 +1398,13 @@ async function proxyRequest(req, res) {
           mapping['claude-sonnet-4-6'],
           mapping['claude-3-7-sonnet-20250219'],
           mapping['claude-3-5-sonnet-20241022'],
-          mapping['claude-haiku-4-5-20251001'],
           ...customModels,
         ]
       : [
           requestedModel,
           mapping[requestedModel],
+          defaultFallbackModel,
+          mapping[defaultFallbackModel],
           ...Object.values(mapping),
           ...customModels,
         ];
@@ -1442,9 +1471,13 @@ async function proxyRequest(req, res) {
   }
 
   try {
+    const buildStart = Date.now();
     const axiosConfig = buildUpstreamRequest(req, baseUrl, apiKey);
+    timing.requestBuildMs = Date.now() - buildStart;
 
+    const upstreamStart = Date.now();
     const upstreamRes = await axios(axiosConfig);
+    timing.upstreamHeadersMs = Date.now() - upstreamStart;
 
     // console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
 
@@ -1481,6 +1514,14 @@ async function proxyRequest(req, res) {
     // ── Body Handling ────────────────────────────────────────────────────
     let rawBody = '';
     let sseBuffer = ''; // for normalizing incomplete SSE lines in streaming mode
+    let promptTokens = 0;
+    let completionTokens = 0;
+    const captureUsage = (json) => {
+      const usage = json?.usage || json?.message?.usage || json?.choices?.[0]?.usage || null;
+      if (!usage) return;
+      promptTokens = usage.prompt_tokens || usage.input_tokens || promptTokens;
+      completionTokens = usage.completion_tokens || usage.output_tokens || completionTokens;
+    };
     let anthropicTranslator = null;
     if (isMessages && isStreaming) {
       anthropicTranslator = new AnthropicSSETranslator(res, requestedModel);
@@ -1488,8 +1529,11 @@ async function proxyRequest(req, res) {
     }
 
     upstreamRes.data.on('data', (chunk) => {
+      if (timing.firstChunkMs === null) {
+        timing.firstChunkMs = Date.now() - startTime;
+      }
       const text = chunk.toString();
-      rawBody += text;
+      if (shouldBuffer) rawBody += text;
 
       if (!shouldBuffer) {
         if (isStreaming) {
@@ -1508,6 +1552,7 @@ async function proxyRequest(req, res) {
               try {
                 const obj = JSON.parse(payload);
                 if (obj === null || typeof obj !== 'object') continue;
+                captureUsage(obj);
 
                 if (anthropicTranslator) {
                   // If upstream is already Anthropic-format (has 'type' but no 'choices')
@@ -1570,6 +1615,10 @@ async function proxyRequest(req, res) {
     });
 
     upstreamRes.data.on('end', async () => {
+      timing.streamDrainMs = timing.firstChunkMs === null
+        ? null
+        : Date.now() - startTime - timing.firstChunkMs;
+
       if (anthropicTranslator) {
         anthropicTranslator.finish();
       }
@@ -1631,24 +1680,19 @@ async function proxyRequest(req, res) {
 
       res.end();
 
-      let promptTokens = 0;
-      let completionTokens = 0;
       try {
-        if (isStreaming) {
-          const lines = rawBody.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data:') && !line.includes('[DONE]')) {
-              const json = JSON.parse(line.slice(5).trim());
-              if (json.usage) {
-                promptTokens = json.usage.prompt_tokens || 0;
-                completionTokens = json.usage.completion_tokens || 0;
-              }
-            }
-          }
-        } else {
+        if (!isStreaming) {
           const json = bufferedBody || JSON.parse(rawBody);
-          promptTokens = json.usage?.prompt_tokens || json.usage?.input_tokens || 0;
-          completionTokens = json.usage?.completion_tokens || json.usage?.output_tokens || 0;
+          // Support multiple usage formats:
+          // 1. OpenAI: json.usage (prompt_tokens / completion_tokens)
+          // 2. Anthropic: json.message.usage (input_tokens / output_tokens)
+          // 3. Some providers: json.choices[0].usage
+          const u = json?.usage
+            || json?.message?.usage
+            || json?.choices?.[0]?.usage
+            || {};
+          promptTokens = u.prompt_tokens || u.input_tokens || promptTokens;
+          completionTokens = u.completion_tokens || u.output_tokens || completionTokens;
         }
       } catch {
         // Usage parse is best-effort
@@ -1669,6 +1713,7 @@ async function proxyRequest(req, res) {
         completionTokens,
         streaming: isStreaming,
         provider: providerName,
+        performance: timing,
       }, userId, accessKey);
     });
 
@@ -1684,6 +1729,7 @@ async function proxyRequest(req, res) {
         provider: providerName,
         error: err.message,
         optimization: optimizationMeta,
+        performance: timing,
       }, userId, accessKey);
       if (!res.headersSent) {
         if (req.path.includes('/messages')) {
@@ -1722,6 +1768,7 @@ async function proxyRequest(req, res) {
     // plain object. Calling JSON.stringify on it causes "circular structure" errors.
     // We must read the stream buffer to get the actual upstream error text.
     let message = err.message;
+    let upstreamErrorCode = '';
     if (err.response?.data && typeof err.response.data.pipe === 'function') {
       try {
         const chunks = [];
@@ -1738,10 +1785,16 @@ async function proxyRequest(req, res) {
       } catch { message = err.message; }
     }
 
+    const rawUpstreamMessage = message;
     try {
       const parsed = JSON.parse(message);
+      upstreamErrorCode = parsed.code || parsed.error?.code || '';
       if (parsed.error && parsed.error.message) {
         message = parsed.error.message;
+      } else if (typeof parsed.error === 'string') {
+        message = parsed.error;
+      } else if (typeof parsed.message === 'string') {
+        message = parsed.message;
       }
     } catch (e) {
       // Keep original message if it's not JSON
@@ -1802,12 +1855,14 @@ async function proxyRequest(req, res) {
 
     const isModelUnavailable =
       ((status === 400 || status === 403 || status === 404 || status === 503) &&
-      /plan_model_forbidden|isn't available on your current plan|model.+not available|无可用渠道|no available channel/i.test(message)) ||
+      (/model_not_found|model_not_available|plan_model_forbidden/i.test(upstreamErrorCode) ||
+      /plan_model_forbidden|isn't available on your current plan|model.+not available|model.+not found|model_not_found|无可用渠道|no available channel/i.test(message) ||
+      /model_not_found|model_not_available|model.+not found|model.+not available/i.test(rawUpstreamMessage))) ||
       (status === 500 && /sensitive words detected/i.test(message));
 
     // 0. Rate Limit Failover: Switch to next API key if available
     if (status === 429) {
-      const currentProvider = providers.find(p => p.baseUrl && (baseUrl.replace(/\/+$/, '') === p.baseUrl.replace(/\/+$/, ''))) || activeProvider;
+      const currentProvider = eligibleProviders.find(p => p.baseUrl && (baseUrl.replace(/\/+$/, '') === p.baseUrl.replace(/\/+$/, ''))) || activeProvider;
       if (!currentProvider?.id) {
         console.warn('[proxy] Rate limit handling skipped: no current provider context available.');
       } else {
@@ -1837,7 +1892,7 @@ async function proxyRequest(req, res) {
       const failedProvider = upstreamProvider || activeProvider;
       if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
 
-      const nextProvider = providers.find((p) => {
+      const nextProvider = eligibleProviders.find((p) => {
         const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
         const hasKey = p.apiKey || (p.apiKeys && p.apiKeys.length > 0);
         const isSameProvider = failedProvider?.id && p.id === failedProvider.id;
@@ -1853,6 +1908,11 @@ async function proxyRequest(req, res) {
           // Keep the original requested model for the next provider
           return proxyRequest(req, res);
         }
+      } else {
+        console.warn(
+          `[proxy] Model ${blockedModel} unavailable on ${failedProvider?.name || activeProvider.name}; no selected fallback provider found. ` +
+          `Selected providers: ${eligibleProviders.map((p) => p.name || p.id).join(', ') || 'none'}`
+        );
       }
 
       // 2. Fallback Model: If ALL providers failed for this model, try a different model
@@ -1884,6 +1944,7 @@ async function proxyRequest(req, res) {
       provider: providerName,
       error: message,
       optimization: optimizationMeta,
+      performance: timing,
     }, userId, accessKey);
 
     if (!res.headersSent) {

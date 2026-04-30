@@ -229,7 +229,7 @@ async function syncSwiftRouterModels(userId, options = {}) {
         lastSyncedAt: new Date(),
         warnings: modelCatalog.warnings
       },
-      { upsert: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Update modelMapping in user config with identity mappings for new models

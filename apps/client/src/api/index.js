@@ -84,6 +84,11 @@ export async function fetchUsers() {
   return handleResponse(await fetch(`${BASE}/admin/users`));
 }
 
+/** GET /api/providers/health */
+export async function fetchProviderHealth() {
+  return handleResponse(await fetch(`${BASE}/providers/health`));
+}
+
 /** GET /api/admin/stats */
 export async function fetchGlobalStats() {
   return handleResponse(await fetch(`${BASE}/admin/stats`));
@@ -109,4 +114,49 @@ export async function regenerateAccessKey() {
   return handleResponse(await fetch(`${BASE}/user/regenerate-key`, {
     method: 'POST'
   }));
+}
+
+// ── GitHub Copilot Auth API ───────────────────────────────────────────────────
+
+/** GET /copilot/auth/status */
+export async function fetchCopilotAuthStatus() {
+  const res = await fetch('/copilot/auth/status', { credentials: 'include' });
+  return res.json();
+}
+
+/** POST /copilot/auth/start — begin Device Flow */
+export async function startCopilotDeviceFlow() {
+  const res = await fetch('/copilot/auth/start', { method: 'POST', credentials: 'include' });
+  return res.json();
+}
+
+/** GET /copilot/auth/poll — poll for completion */
+export async function pollCopilotDeviceFlow() {
+  const res = await fetch('/copilot/auth/poll', { credentials: 'include' });
+  return res.json();
+}
+
+/** POST /copilot/auth/set-token — inject a token manually */
+export async function setCopilotToken(token) {
+  const res = await fetch('/copilot/auth/set-token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ token }),
+  });
+  return res.json();
+}
+
+/** POST /copilot/auth/logout — clear tokens */
+export async function logoutCopilot() {
+  const res = await fetch('/copilot/auth/logout', { method: 'POST', credentials: 'include' });
+  return res.json();
+}
+
+/** GET /copilot/v1/models — list available models (needs bridge API key) */
+export async function fetchCopilotModels(apiKey) {
+  const res = await fetch('/copilot/v1/models', {
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+  });
+  return res.json();
 }

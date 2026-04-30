@@ -7,12 +7,16 @@ const { EventEmitter } = require('events');
 const { loadConfig } = require('../config/config');
 const { morganStream } = require('../middlewares/logger');
 const v1Router = require('../routes/v1');
+const copilotRouter = require('../routes/copilot');
 const { syncSwiftRouterModels } = require('./swiftrouter-sync');
 
 function createProxyRuntime(options = {}) {
   const userId = options.userId; // user context is now required
   const host = options.host || '127.0.0.1';
   const publicHost = options.publicHost || host;
+  const publicPort = Number(options.publicPort || 3000);
+  const publicBaseUrl = options.publicBaseUrl || '';
+  const embedded = options.embedded === true;
   const emitter = new EventEmitter();
 
   let app = null;
@@ -46,6 +50,7 @@ function createProxyRuntime(options = {}) {
     serverApp.use(express.urlencoded({ extended: true, limit: '50mb' }));
     serverApp.use(morgan('dev', { stream: morganStream }));
     serverApp.use('/v1', v1Router);
+    serverApp.use('/copilot', copilotRouter);
 
     return { serverApp, server };
   }
@@ -66,15 +71,18 @@ function createProxyRuntime(options = {}) {
     }
     const config = await loadConfig(userId);
     const configuredPort = Number(config.port || 3000);
-    const activePort = boundPort || configuredPort;
+    const activePort = embedded ? publicPort : (boundPort || configuredPort);
+    const endpoint = publicBaseUrl
+      ? `${publicBaseUrl.replace(/\/$/, '')}/v1`
+      : `http://${publicHost}:${activePort}/v1`;
 
     return {
-      running: Boolean(httpServer && startedAt),
+      running: embedded ? Boolean(startedAt) : Boolean(httpServer && startedAt),
       host,
       publicHost,
       configuredPort,
       boundPort,
-      endpoint: `http://${publicHost}:${activePort}/v1`,
+      endpoint,
       restartRequired: Boolean(startedAt && boundPort && configuredPort !== boundPort),
       startedAt,
       lastError,
@@ -110,6 +118,18 @@ function createProxyRuntime(options = {}) {
   async function start() {
     if (httpServer) return getState();
     if (!userId) throw new Error('Cannot start proxy runtime without a userId');
+
+    if (embedded) {
+      startedAt = Date.now();
+      boundPort = publicPort;
+      lastError = '';
+      await emitState();
+      runStartupSync().catch((error) => {
+        lastError = error.message;
+        emitState().catch(console.error);
+      });
+      return getState();
+    }
 
     const runtimeParts = await buildServer();
     app = runtimeParts.serverApp;
@@ -162,6 +182,13 @@ function createProxyRuntime(options = {}) {
   }
 
   async function stop() {
+    if (embedded) {
+      startedAt = null;
+      boundPort = null;
+      await emitState();
+      return getState();
+    }
+
     if (!httpServer) return getState();
 
     const server = httpServer;

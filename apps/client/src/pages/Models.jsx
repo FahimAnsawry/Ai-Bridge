@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Box, Sparkles, Cpu, Zap, Activity, Copy, Check, RefreshCw, AlertCircle } from 'lucide-react';
+import { Box, Sparkles, Zap, Activity, Copy, Check, AlertCircle } from 'lucide-react';
 import { fetchModels } from '../api';
 
 const ModelCard = ({ model, index }) => {
@@ -22,6 +22,7 @@ const ModelCard = ({ model, index }) => {
     if (p.includes('moonshot') || p.includes('kimi')) return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
     if (p.includes('minimax')) return 'text-pink-400 bg-pink-400/10 border-pink-400/20';
     if (p.includes('alibaba') || p.includes('qwen')) return 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20';
+    if (p.includes('xai') || p.includes('grok')) return 'text-sky-400 bg-sky-400/10 border-sky-400/20';
     return 'text-indigo-400 bg-indigo-400/10 border-indigo-400/20';
   };
 
@@ -91,18 +92,26 @@ const Models = ({ user }) => {
       
       const fetchedModels = res.data || [];
       const hardcodedModels = [
+        { id: 'gpt-5-mini', name: 'GPT-5 Mini', owned_by: 'openai' },
+        { id: 'gpt-5.2', name: 'GPT-5.2', owned_by: 'openai' },
+        { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex', owned_by: 'openai' },
+        { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', owned_by: 'openai' },
         { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', owned_by: 'anthropic' },
+        { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', owned_by: 'anthropic' },
+        { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', owned_by: 'anthropic' },
         { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', owned_by: 'anthropic' },
         { id: 'glm-5.1', name: 'GLM 5.1', owned_by: 'zhipu' },
+        { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', owned_by: 'xai' },
         { id: 'kimi-k2.6', name: 'Kimi K2.6', owned_by: 'moonshot' },
         { id: 'minimax-m2.7', name: 'MiniMax M2.7', owned_by: 'minimax' },
         { id: 'qwen-3.6-plus', name: 'Qwen 3.6 Plus', owned_by: 'alibaba' },
- { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B', owned_by: 'alibaba' },
+        { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B', owned_by: 'alibaba' },
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', owned_by: 'google' },
         { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', owned_by: 'google' },
         { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', owned_by: 'google' },
         { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', owned_by: 'google' },
         { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', owned_by: 'openai' },
- { id: 'gpt-5.5', name: 'GPT-5.5', owned_by: 'openai' }
+        { id: 'gpt-5.5', name: 'GPT-5.5', owned_by: 'openai' }
       ];
 
       const allModels = [...fetchedModels];
@@ -129,7 +138,7 @@ const Models = ({ user }) => {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col gap-6 h-full overflow-hidden"
+      className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-6 lg:py-4"
     >
       <header className="shrink-0">
         <div className="flex items-center gap-3 mb-2">
@@ -149,13 +158,13 @@ const Models = ({ user }) => {
       </header>
 
       {error && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-rose-400 text-xs font-medium">
+        <div className="shrink-0 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-rose-400 text-xs font-medium">
           <AlertCircle size={16} />
           {error}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+      <div className="flex-1 pr-2">
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
              {[...Array(8)].map((_, i) => (

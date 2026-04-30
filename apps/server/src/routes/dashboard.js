@@ -2,12 +2,13 @@
  * routes/dashboard.js — Dashboard REST API
  *
  * Provides endpoints consumed by the React dashboard:
- *   GET  /api/status       — Server health & uptime stats
- *   GET  /api/config       — Current config (key masked)
- *   POST /api/config       — Update config settings
- *   GET  /api/logs         — All stored request logs
- *   DELETE /api/logs       — Clear all logs
- *   GET  /api/models       — Fetch model list from upstream (cached 5 min)
+ *   GET  /api/status           — Server health & uptime stats
+ *   GET  /api/config           — Current config (key masked)
+ *   POST /api/config           — Update config settings
+ *   GET  /api/logs             — All stored request logs
+ *   DELETE /api/logs           — Clear all logs
+ *   GET  /api/models           — Fetch model list from upstream (cached 5 min)
+ *   GET  /api/providers/health — Check health status of each configured provider
  */
 
 const express = require('express');
@@ -20,6 +21,7 @@ const ALLOWED_CONFIG_FIELDS = [
   'provider_base_url',
   'active_provider_id',
   'providers',
+  'replace_providers',
   'port',
   'cors_origins',
   'api_keys',
@@ -129,6 +131,16 @@ function createDashboardRouter(runtime) {
         error: error.message || 'Model sync failed.',
         code: error.code || 'sync_failed',
       });
+    }
+  });
+
+  // GET /api/providers/health — check health of all configured providers
+  router.get('/providers/health', async (req, res) => {
+    try {
+      res.json(await adminService.checkProviderHealth(req.user._id));
+    } catch (error) {
+      console.error('[providers/health] Failed:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to check provider health.' });
     }
   });
 

@@ -79,7 +79,7 @@ function AppContent() {
         user={user}
       />
 
-      <main className='relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-24 sm:px-8 sm:pb-12 sm:pt-28 lg:pt-10 transition-all duration-300 overflow-y-auto lg:overflow-hidden'>
+      <main className='relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-24 sm:px-8 sm:pb-12 sm:pt-28 lg:pt-10 transition-all duration-300 overflow-y-auto'>
         <div className='mx-auto w-full max-w-[92rem]'>
           <AnimatePresence mode='wait'>
             <Routes>

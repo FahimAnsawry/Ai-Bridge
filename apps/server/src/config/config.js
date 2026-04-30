@@ -8,6 +8,25 @@ function isDbConnected() {
   return mongoose.connection.readyState === 1;
 }
 
+const CONFIG_CACHE_TTL_MS = 5_000;
+const configCache = new Map();
+
+function getConfigCacheKey(userId, includeCatalogs) {
+  return `${userId.toString()}:${includeCatalogs ? 'catalogs' : 'lite'}`;
+}
+
+function clearConfigCache(userId) {
+  if (!userId) {
+    configCache.clear();
+    return;
+  }
+
+  const prefix = `${userId.toString()}:`;
+  for (const key of configCache.keys()) {
+    if (key.startsWith(prefix)) configCache.delete(key);
+  }
+}
+
 const DEFAULTS = {
   port: 3000,
   cors_origins: ['*'],
@@ -16,12 +35,13 @@ const DEFAULTS = {
     'kimi-k2.5': 'kimi-k2.5',
     'kimi-k2': 'kimi-k2.5',
     'kimi': 'kimi-k2.5',
-    'claude-haiku-4-5-20251001': 'deepseek-v3.2',
+    'claude-haiku-4.5': 'claude-haiku-4.5',
+    'claude-haiku-4-5-20251001': 'claude-haiku-4.5',
     'claude-opus-4-6': 'claude-opus-4-6',
     'claude-sonnet-4-6': 'claude-sonnet-4-6',
     'claude-sonnet-4.6': 'claude-sonnet-4-6',
     'claude-opus-4.6': 'claude-opus-4-6',
-    'claude-3-5-sonnet-20241022': 'deepseek-v3.2',
+    'claude-3-5-sonnet-20241022': 'claude-haiku-4.5',
     'glm-5.1': 'glm-5.1',
     'kimi-k2.6': 'kimi-k2.6',
     'minimax-m2.7': 'minimax-m2.7',
@@ -72,13 +92,44 @@ const DEFAULTS = {
   ]
 };
 
+const DEFAULT_CLAUDE_FALLBACK_MODEL = 'claude-haiku-4.5';
+const DEFAULT_CLAUDE_FALLBACK_MAPPINGS = {
+  'claude-haiku-4.5': DEFAULT_CLAUDE_FALLBACK_MODEL,
+  'claude-haiku-4-5-20251001': DEFAULT_CLAUDE_FALLBACK_MODEL,
+  'claude-3-5-sonnet-20241022': DEFAULT_CLAUDE_FALLBACK_MODEL,
+};
+
+function applyDefaultClaudeFallbackMappings(modelMapping) {
+  const normalized = {
+    ...(modelMapping || {}),
+    ...DEFAULT_CLAUDE_FALLBACK_MAPPINGS,
+  };
+
+  for (const [modelId, mappedModel] of Object.entries(normalized)) {
+    if (/^claude/i.test(modelId) && mappedModel === 'deepseek-v3.2') {
+      normalized[modelId] = DEFAULT_CLAUDE_FALLBACK_MODEL;
+    }
+  }
+
+  return normalized;
+}
+
 function normalizeActiveProviderId(providers, activeProviderId) {
   const list = Array.isArray(providers) ? providers : [];
   if (list.length === 0) return null;
-  if (activeProviderId && list.some((p) => p.id === activeProviderId)) {
+  const selected = list.filter((p) => p?.isActive !== false);
+  if (selected.length === 0) return null;
+  if (activeProviderId && selected.some((p) => p.id === activeProviderId)) {
     return activeProviderId;
   }
-  return list[0].id || null;
+  return selected[0].id || null;
+}
+
+function getActiveProviderIds(providers) {
+  return (Array.isArray(providers) ? providers : [])
+    .filter((p) => p?.isActive !== false)
+    .map((p) => p.id)
+    .filter(Boolean);
 }
 
 /**
@@ -103,10 +154,12 @@ async function loadGlobalConfig() {
  * Load config for a specific user.
  * Merges UserConfig, Providers, and ModelCatalog into a single object.
  */
-async function loadConfig(userId) {
+async function loadConfig(userId, options = {}) {
   if (!userId) {
     throw new Error('loadConfig requires a userId');
   }
+
+  const includeCatalogs = options.includeCatalogs !== false;
 
   if (userId === 'default' || !isDbConnected()) {
     return {
@@ -122,19 +175,26 @@ async function loadConfig(userId) {
       token_summarization_enabled: DEFAULTS.token_summarization_enabled,
       response_cache_enabled: DEFAULTS.response_cache_enabled,
       response_cache_ttl_seconds: DEFAULTS.response_cache_ttl_seconds,
+      active_provider_id: normalizeActiveProviderId(DEFAULTS.providers, DEFAULTS.active_provider_id),
+      active_provider_ids: getActiveProviderIds(DEFAULTS.providers),
       providers: DEFAULTS.providers,
       model_catalogs: [],
     };
   }
 
   const uId = new mongoose.Types.ObjectId(userId.toString());
+  const cacheKey = getConfigCacheKey(uId, includeCatalogs);
+  const cached = configCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
 
   // Fetch everything in parallel
   const [user, userConfig, catalogs, providerDocs] = await Promise.all([
-    User.findById(uId),
-    UserConfig.findOne({ userId: uId }),
-    ModelCatalog.find({ userId: uId }),
-    Provider.find({ userId: uId })
+    User.findById(uId).lean(),
+    UserConfig.findOne({ userId: uId }).lean(),
+    includeCatalogs ? ModelCatalog.find({ userId: uId }).lean() : Promise.resolve([]),
+    Provider.find({ userId: uId }).lean()
   ]);
 
   if (!user) {
@@ -147,6 +207,7 @@ async function loadConfig(userId) {
   const modelMapping = cfg.modelMapping
     ? (cfg.modelMapping instanceof Map ? Object.fromEntries(cfg.modelMapping) : cfg.modelMapping)
     : { ...DEFAULTS.model_mapping };
+  const normalizedModelMapping = applyDefaultClaudeFallbackMappings(modelMapping);
 
   const providers = providerDocs.length > 0
     ? providerDocs.map(p => ({
@@ -166,12 +227,14 @@ async function loadConfig(userId) {
       isActive: p.isActive
     }));
 
+  const activeProviderId = normalizeActiveProviderId(providers, cfg.activeProviderId || user.activeProviderId || null);
   const config = {
     port: cfg.port || user.config?.port || DEFAULTS.port,
     cors_origins: cfg.corsOrigins?.length ? cfg.corsOrigins : (user.config?.corsOrigins?.length ? user.config.corsOrigins : DEFAULTS.cors_origins),
     model_routing: cfg.modelRouting || user.config?.modelRouting || DEFAULTS.model_routing,
-    active_provider_id: normalizeActiveProviderId(providers, cfg.activeProviderId || user.activeProviderId || null),
-    model_mapping: modelMapping,
+    active_provider_id: activeProviderId,
+    active_provider_ids: getActiveProviderIds(providers),
+    model_mapping: normalizedModelMapping,
     stub_models: cfg.stubModels || user.config?.stubModels || [],
     request_minimization_enabled: cfg.requestMinimizationEnabled ?? user.config?.requestMinimizationEnabled ?? DEFAULTS.request_minimization_enabled,
     chat_max_upstream_attempts: cfg.chatMaxUpstreamAttempts ?? user.config?.chatMaxUpstreamAttempts ?? DEFAULTS.chat_max_upstream_attempts,
@@ -190,6 +253,11 @@ async function loadConfig(userId) {
     config.port = parseInt(process.env.PORT, 10);
   }
 
+  configCache.set(cacheKey, {
+    value: config,
+    expiresAt: Date.now() + CONFIG_CACHE_TTL_MS,
+  });
+
   return config;
 }
 
@@ -198,6 +266,7 @@ async function loadConfig(userId) {
  */
 async function saveConfig(userId, updates) {
   if (!userId) throw new Error('saveConfig requires a userId');
+  clearConfigCache(userId);
 
   if (!isDbConnected()) {
     const base = await loadConfig('default');
@@ -205,12 +274,22 @@ async function saveConfig(userId, updates) {
   }
 
   const uId = new mongoose.Types.ObjectId(userId.toString());
-  const user = await User.findById(uId);
+  const user = await User.findById(uId).select('providers activeProviderId').lean();
   if (!user) throw new Error('User not found during saveConfig');
 
-  // 1. Update User document (for providers and activeProviderId)
-  if (updates.active_provider_id !== undefined) user.activeProviderId = updates.active_provider_id;
+  const userUpdates = {};
+  let providersForNormalization = user.providers || [];
+
+  // 1. Update User document compatibility fields atomically. Do not use
+  // user.save() here: Settings can issue overlapping saves, and Mongoose
+  // version checks on the loaded document can reject otherwise valid updates.
+  if (updates.active_provider_id !== undefined) {
+    userUpdates.activeProviderId = updates.active_provider_id;
+  }
+
   if (updates.providers && Array.isArray(updates.providers)) {
+    const replaceProviders = updates.replace_providers === true;
+
     // Sync to Provider collection
     const syncOps = updates.providers.map(p => ({
       updateOne: {
@@ -229,14 +308,16 @@ async function saveConfig(userId, updates) {
     }));
     if (syncOps.length > 0) await Provider.bulkWrite(syncOps);
 
-    const providerIds = updates.providers.map((p) => p.id);
-    await Provider.deleteMany({
-      userId: uId,
-      providerId: { $nin: providerIds }
-    });
+    if (replaceProviders) {
+      const providerIds = updates.providers.map((p) => p.id);
+      await Provider.deleteMany({
+        userId: uId,
+        providerId: { $nin: providerIds }
+      });
+    }
 
     // Also keep in User document for backward compatibility
-    user.providers = updates.providers.map(p => {
+    const incomingProviders = updates.providers.map(p => {
       const apiKeys = Array.isArray(p.apiKeys) ? p.apiKeys : (p.apiKey ? [p.apiKey] : []);
       const primaryKey = p.apiKey || (apiKeys.length > 0 ? apiKeys[0] : '');
 
@@ -249,10 +330,44 @@ async function saveConfig(userId, updates) {
         isActive: p.isActive !== undefined ? p.isActive : true
       };
     });
+
+    providersForNormalization = replaceProviders
+      ? incomingProviders
+      : [
+          ...((user.providers || []).filter(
+            (existing) => !incomingProviders.some((incoming) => incoming.id === existing.id)
+          )),
+          ...incomingProviders,
+        ];
+
+    userUpdates.providers = providersForNormalization;
+  } else {
+    const providerDocs = await Provider.find({ userId: uId }).lean();
+    if (providerDocs.length > 0) {
+      providersForNormalization = providerDocs.map((p) => ({
+        id: p.providerId,
+        name: p.name,
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        apiKeys: p.apiKeys && p.apiKeys.length > 0 ? p.apiKeys : (p.apiKey ? [p.apiKey] : []),
+        isActive: p.isActive,
+      }));
+    }
   }
 
-  user.activeProviderId = normalizeActiveProviderId(user.providers || [], user.activeProviderId);
-  await user.save();
+  if (updates.providers !== undefined || updates.active_provider_id !== undefined) {
+    const requestedActiveProviderId = updates.active_provider_id !== undefined
+      ? updates.active_provider_id
+      : user.activeProviderId;
+    userUpdates.activeProviderId = normalizeActiveProviderId(
+      providersForNormalization,
+      requestedActiveProviderId
+    );
+  }
+
+  if (Object.keys(userUpdates).length > 0) {
+    await User.updateOne({ _id: uId }, { $set: userUpdates });
+  }
 
   // 2. Update/Create UserConfig document (for specific settings)
   const configUpdates = {
@@ -300,10 +415,11 @@ async function saveConfig(userId, updates) {
   await UserConfig.findOneAndUpdate(
     { userId: uId },
     { $set: configUpdates },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 
+  clearConfigCache(uId);
   return await loadConfig(uId);
 }
 
-module.exports = { loadConfig, saveConfig, loadGlobalConfig, DEFAULTS };
+module.exports = { loadConfig, saveConfig, loadGlobalConfig, clearConfigCache, DEFAULTS };

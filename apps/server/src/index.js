@@ -10,12 +10,19 @@ const { Server: SocketIOServer } = require('socket.io');
 const { loadConfig } = require('./config/config');
 const { attachSocketIO, morganStream } = require('./middlewares/logger');
 const createDashboardRouter = require('./routes/dashboard');
+const copilotRouter = require('./routes/copilot');
 const { createProxyRuntime } = require('./services/proxy-runtime');
 const passport = require('./config/passport');
 const { requireAuth } = require('./middlewares/auth-middleware');
 
+function envFlag(name) {
+  const value = process.env[name];
+  return value === '1' || value === 'true';
+}
+
 function createWebServer(options = {}) {
   const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+  const exposeV1 = options.exposeV1 === true || isVercel;
   const runtime = options.runtime || createProxyRuntime({ 
     host: options.host || '127.0.0.1', 
     userId: options.userId || 'default' 
@@ -47,8 +54,9 @@ function createWebServer(options = {}) {
     },
   }));
 
-  // Parse JSON bodies
-  app.use(express.json());
+  // Match proxy runtime limits when /v1 is mounted directly in single-port deployments.
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Passport init
   app.use(passport.initialize());
@@ -85,8 +93,11 @@ function createWebServer(options = {}) {
   // Protected Dashboard API
   app.use('/api', requireAuth, createDashboardRouter(runtime));
 
-  // Mount Proxy V1 directly if on Vercel (since we can't start a second server)
-  if (isVercel) {
+  // GitHub Copilot Proxy — always mounted (auth handled internally)
+  app.use('/copilot', copilotRouter);
+
+  // Mount Proxy V1 directly for single-port deployments such as Vercel and Render.
+  if (exposeV1) {
     const v1Router = require('./routes/v1');
     app.use('/v1', v1Router);
   }
@@ -95,14 +106,17 @@ function createWebServer(options = {}) {
   app.use(express.static(CLIENT_DIST));
 
   app.get('/{*path}', (req, res) => {
-    res.sendFile(path.join(CLIENT_DIST, 'index.html'), (err) => {
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'), async (err) => {
       if (err) {
-        const state = runtime.getState();
+        const state = await runtime.getState().catch(() => ({
+          endpoint: '',
+          configuredPort: Number(process.env.PORT || 3000),
+        }));
         res.status(200).json({
           message: 'AI Proxy Server is running.',
           v1Endpoint: state.endpoint,
           dashboard: options.dashboardUrl || 'Desktop renderer',
-          configuredPort: config.port,
+          configuredPort: state.configuredPort,
         });
       }
     });
@@ -115,7 +129,13 @@ async function startStandaloneServer() {
   const { mongoose, User } = require('./config/db');
 
   const bindHost = process.env.HOST || '127.0.0.1';
-  const publicHost = process.env.PUBLIC_HOST || bindHost;
+  const isRender = envFlag('RENDER');
+  const singlePortMode = isRender || envFlag('SINGLE_PORT_MODE');
+  const port = Number(process.env.PORT || 3000);
+  const publicHost = process.env.PUBLIC_HOST || process.env.RENDER_EXTERNAL_HOSTNAME || bindHost;
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL
+    || process.env.RENDER_EXTERNAL_URL
+    || (singlePortMode && process.env.PUBLIC_HOST ? `https://${process.env.PUBLIC_HOST}` : '');
 
   // Try to get the first admin user — but don't block startup if DB isn't ready
   let userId = 'default';
@@ -130,21 +150,38 @@ async function startStandaloneServer() {
     console.warn('[server] MongoDB not yet connected — starting with userId=default. Will sync when DB connects.');
   }
 
-  const runtime = createProxyRuntime({ host: bindHost, publicHost, userId });
-  const { app } = createWebServer({ runtime, dashboardUrl: 'http://localhost:5174 (Vite dev server)' });
+  const runtime = createProxyRuntime({
+    host: bindHost,
+    publicHost,
+    publicPort: port,
+    publicBaseUrl,
+    userId,
+    embedded: singlePortMode,
+  });
+  const dashboardUrl = singlePortMode
+    ? (publicBaseUrl || `http://${publicHost}:${port}`)
+    : 'http://localhost:5174 (Vite dev server)';
+  const { app } = createWebServer({
+    runtime,
+    dashboardUrl,
+    exposeV1: singlePortMode,
+  });
   await runtime.start();
 
-  const port = Number(process.env.PORT || 3001);
-  const webServer = app.listen(port + 1, bindHost, async () => {
+  const webPort = singlePortMode ? port : port + 1;
+  const webServer = app.listen(webPort, bindHost, async () => {
     const state = await runtime.getState();
     const endpoint = state.endpoint || `http://${publicHost}:${port}/v1`;
+    const apiBase = singlePortMode
+      ? (publicBaseUrl || `http://${publicHost}:${webPort}`)
+      : `http://${publicHost}:${webPort}`;
     console.log('');
     console.log('╔══════════════════════════════════════════════╗');
     console.log('║        AI Proxy Server — SwiftRouter         ║');
     console.log('╠══════════════════════════════════════════════╣');
     console.log(`║  Proxy  ▶  ${endpoint.padEnd(34)}║`);
-    console.log(`║  API    ▶  http://${publicHost}:${port + 1}/api`.padEnd(47) + '║');
-    console.log('║  Dashboard ▶  http://localhost:5174 (Vite)   ║');
+    console.log(`║  API    ▶  ${`${apiBase}/api`.padEnd(34)}║`);
+    console.log(`║  Dashboard ▶  ${dashboardUrl.padEnd(29)}║`);
     console.log('╚══════════════════════════════════════════════╝');
     console.log('');
   });

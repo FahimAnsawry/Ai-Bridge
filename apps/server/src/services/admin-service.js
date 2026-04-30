@@ -85,6 +85,49 @@ function createAdminService(runtime) {
     }
   }
 
+  async function checkProviderHealth(userId) {
+    const config = await loadConfig(userId);
+    const providers = Array.isArray(config.providers) ? config.providers : [];
+    const activeProviderId = config.active_provider_id;
+    const selectedProviders = providers.filter((provider) => provider?.isActive !== false);
+    const providersToReport = [...selectedProviders].sort((a, b) => {
+      if (a.id === activeProviderId) return -1;
+      if (b.id === activeProviderId) return 1;
+      return 0;
+    });
+
+    if (providersToReport.length === 0) {
+      return { providers: [], summary: { total: 0, online: 0, error: 0, unknown: 0 } };
+    }
+
+    const healthResults = providersToReport.map((provider) => {
+      const hasKey = Array.isArray(provider.apiKeys)
+        ? provider.apiKeys.some((k) => k && k.trim().length > 0)
+        : Boolean(provider.apiKey);
+
+      return {
+        id: provider.id,
+        name: provider.name || provider.id,
+        isActive: provider.id === activeProviderId,
+        isSelected: provider.isActive !== false,
+        status: 'unknown',
+        message: !provider.baseUrl ? 'No base URL configured' : (!hasKey ? 'No API key configured' : 'Provider configured'),
+        latencyMs: null,
+        hasApiKey: hasKey,
+      };
+    });
+
+    const summary = {
+      total: healthResults.length,
+      online: healthResults.filter((provider) => provider.status === 'online').length,
+      error: healthResults.filter((provider) => provider.status === 'error').length,
+      unauthorized: healthResults.filter((provider) => provider.status === 'unauthorized').length,
+      unknown: healthResults.filter((provider) => provider.status === 'unknown').length,
+    };
+
+    return { providers: healthResults, summary };
+  }
+
   async function listLogs(userId, filters = {}) {
     return await getLogs(userId, filters);
   }
@@ -203,6 +246,7 @@ function createAdminService(runtime) {
     listModels,
     getModelOfferings,
     syncModels,
+    checkProviderHealth,
     listAllUsers,
     getGlobalStats,
     getUserById,

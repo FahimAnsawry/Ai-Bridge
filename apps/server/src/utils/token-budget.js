@@ -13,9 +13,15 @@ function extractTextFromContent(content) {
               if (!nested) return '';
               if (typeof nested === 'string') return nested;
               if (typeof nested.text === 'string') return nested.text;
+              if (nested.type === 'reasoning_content' && typeof nested.content === 'string') {
+                return `[reasoning]${nested.content}[/reasoning]`;
+              }
               return JSON.stringify(nested);
             })
             .join(' ');
+        }
+        if (block.type === 'reasoning_content' && typeof block.content === 'string') {
+          return `[reasoning]${block.content}[/reasoning]`;
         }
         return JSON.stringify(block);
       })

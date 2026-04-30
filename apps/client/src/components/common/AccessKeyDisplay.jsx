@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FiCopy, FiCheck, FiRefreshCw } from 'react-icons/fi';
+import { FiCopy, FiCheck } from 'react-icons/fi';
 import { regenerateAccessKey } from '../../api';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -33,21 +33,61 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
     }
   };
 
+  const confirmTitle = accessKey ? 'Regenerate Access Key' : 'Generate Access Key';
+  const confirmMessage = accessKey
+    ? 'Are you sure you want to regenerate your access key? The old one will stop working immediately.'
+    : 'Generate your first access key to start using the proxy.';
+  const confirmAction = accessKey ? 'Regenerate' : 'Generate';
+
+  const feedbackLayers = (
+    <AnimatePresence>
+      {showConfirmModal && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-2xl">
+            <h2 className="text-lg font-bold text-white">{confirmTitle}</h2>
+            <p className="text-slate-400 text-sm">{confirmMessage}</p>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setShowConfirmModal(false)} className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition-colors">Cancel</button>
+              <button type="button" onClick={handleRegenerate} className="flex-1 py-2 rounded-xl text-xs font-bold bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all active:scale-95">{confirmAction}</button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {error && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-2xl">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-rose-500" />
+              Error
+            </h2>
+            <p className="text-slate-400 text-sm">{error}</p>
+            <button type="button" onClick={() => setError(null)} className="w-full py-2 rounded-xl text-xs font-bold bg-slate-800 text-white hover:bg-slate-700 transition-all">Close</button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   if (!accessKey) {
     return (
-      <div className="p-4 bg-yellow-50/5 border border-yellow-500/20 text-yellow-500 rounded-xl flex items-center justify-between">
-        <div>
-          <p className="text-sm font-bold">No Access Key</p>
-          <p className="text-[10px] opacity-70">Generate your first key to start using the proxy.</p>
+      <>
+        <div className="p-4 bg-yellow-50/5 border border-yellow-500/20 text-yellow-500 rounded-xl flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold">No Access Key</p>
+            <p className="text-[10px] opacity-70">Generate your first key to start using the proxy.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowConfirmModal(true)}
+            disabled={loading}
+            className="px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+          >
+            {loading ? '...' : 'Generate'}
+          </button>
         </div>
-        <button
-          onClick={() => setShowConfirmModal(true)}
-          disabled={loading}
-          className="px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
-        >
-          {loading ? '...' : 'Generate'}
-        </button>
-      </div>
+        {feedbackLayers}
+      </>
     );
   }
 
@@ -63,14 +103,6 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
             <p className="text-[10px] text-slate-500">Your unique gateway credentials</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowConfirmModal(true)}
-          disabled={loading}
-          className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-indigo-400 transition-colors"
-          title="Regenerate Key"
-        >
-          <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
       </div>
 
       <div className="flex items-center gap-2">
@@ -78,6 +110,7 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
           {visible ? accessKey : '••••••••'}
         </div>
         <button
+          type="button"
           onClick={() => setVisible(!visible)}
           className="p-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition-colors text-slate-400"
           title={visible ? "Hide Key" : "Show Key"}
@@ -89,6 +122,7 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
           )}
         </button>
         <button
+          type="button"
           onClick={handleCopy}
           className="p-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl transition-all active:scale-95 flex items-center justify-center min-w-[2.5rem]"
           title="Copy to clipboard"
@@ -103,33 +137,7 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
         </p>
       )}
 
-      <AnimatePresence>
-        {showConfirmModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-2xl">
-              <h2 className="text-lg font-bold text-white">Regenerate Access Key</h2>
-              <p className="text-slate-400 text-sm">Are you sure you want to regenerate your access key? The old one will stop working immediately.</p>
-              <div className="flex gap-3">
-                <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition-colors">Cancel</button>
-                <button onClick={handleRegenerate} className="flex-1 py-2 rounded-xl text-xs font-bold bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all active:scale-95">Regenerate</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {error && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-2xl">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-rose-500" />
-                Error
-              </h2>
-              <p className="text-slate-400 text-sm">{error}</p>
-              <button onClick={() => setError(null)} className="w-full py-2 rounded-xl text-xs font-bold bg-slate-800 text-white hover:bg-slate-700 transition-all">Close</button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {feedbackLayers}
     </div>
   );
 }

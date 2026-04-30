@@ -12,11 +12,12 @@ import {
   Clock,
   CheckCircle2,
 } from 'lucide-react';
-import { fetchStatus, fetchLogs } from '../api';
+import { fetchStatus, fetchLogs, fetchProviderHealth } from '../api';
 import PageHeader from '../components/dashboard/PageHeader';
 import KPICard from '../components/dashboard/KPICard';
 import UsageTrendChart from '../components/dashboard/UsageTrendChart';
 import ModelDistribution from '../components/dashboard/ModelDistribution';
+import ProviderHealthPanel from '../components/dashboard/ProviderHealthPanel';
 import { SkeletonKpi, SkeletonChart, EmptyState, ErrorState } from '../components/dashboard/StateBanner';
 
 const GRADIENTS = {
@@ -46,8 +47,11 @@ const Overview = ({ user }) => {
   const [modelDistributionData, setModelDistributionData] = useState([]);
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [providerHealth, setProviderHealth] = useState([]);
+  const [isHealthLoading, setIsHealthLoading] = useState(true);
   const intervalRef = useRef(null);
   const logsIntervalRef = useRef(null);
+  const healthIntervalRef = useRef(null);
   const endpoint = 'http://localhost:3000/v1';
 
   const loadData = useCallback(async () => {
@@ -86,10 +90,23 @@ const Overview = ({ user }) => {
     }
   }, []);
 
+  const loadProviderHealth = useCallback(async () => {
+    try {
+      const health = await fetchProviderHealth();
+      setProviderHealth(health.providers || []);
+    } catch (e) {
+      console.error('Failed to load provider health:', e.message);
+      setProviderHealth([]);
+    } finally {
+      setIsHealthLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const fetch = async () => {
       await loadData();
+      await loadProviderHealth();
       if (!cancelled) setIsInitialLoad(false);
     };
     fetch();
@@ -102,13 +119,22 @@ const Overview = ({ user }) => {
         console.error('Failed to fetch logs:', e.message);
       }
     }, 30_000);
+    healthIntervalRef.current = setInterval(async () => {
+      try {
+        const health = await fetchProviderHealth();
+        if (!cancelled) setProviderHealth(health.providers || []);
+      } catch (e) {
+        console.error('Failed to fetch provider health:', e.message);
+      }
+    }, 60_000);
 
     return () => {
       cancelled = true;
       clearInterval(intervalRef.current);
       clearInterval(logsIntervalRef.current);
+      clearInterval(healthIntervalRef.current);
     };
-  }, [loadData]);
+  }, [loadData, loadProviderHealth]);
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -118,8 +144,12 @@ const Overview = ({ user }) => {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadData();
+    await Promise.all([loadData(), loadProviderHealth()]);
     setTimeout(() => setIsRefreshing(false), 600);
+  };
+
+  const handleHealthRefresh = async () => {
+    await loadProviderHealth();
   };
 
   if (isInitialLoad) {
@@ -232,7 +262,15 @@ const Overview = ({ user }) => {
         </div>
       </motion.div>
 
-      {/* ── MAIN CONTENT ───────────────────────────────────────────────���─── */}
+      {/* ── PROVIDER HEALTH STRIP ──────────────────────────────────────────── */}
+      <ProviderHealthPanel
+        providers={providerHealth}
+        loading={isHealthLoading}
+        isRefreshing={isRefreshing}
+        onRefresh={handleHealthRefresh}
+      />
+
+      {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4">
         {error ? (
           <div className="h-full overflow-y-auto pr-2">

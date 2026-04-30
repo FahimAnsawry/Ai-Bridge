@@ -1,5 +1,8 @@
 const { mongoose, User } = require('../config/db');
 
+const ACCESS_KEY_CACHE_TTL_MS = 10_000;
+const accessKeyCache = new Map();
+
 // Helper to check if DB is actually usable
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
@@ -33,6 +36,7 @@ function requireAuth(req, res, next) {
 }
 
 async function requireAccessKey(req, res, next) {
+  const authStart = Date.now();
   const apiKey = req.headers['x-api-key'] || req.query['key'] || (req.headers.authorization || '').replace('Bearer ', '');
   
   if (!apiKey) {
@@ -49,23 +53,26 @@ async function requireAccessKey(req, res, next) {
   }
 
   try {
-    // Basic search on users might be expensive if we strictly use bcrypt.compare on all users.
-    // For scale, we should extract the salt/id from the API key.
-    // Given the previous user schema `accessKeyHash` exists, but there's no reverse index.
-    // However, we added a `accessKey` (sparse unique) initially. But that's raw. 
-    // We should probably rely on a bearer token standard or check all.
-    // Wait, the plan says: `accessKey` (unique, sparse). We can search by `accessKeyHash` if it was deterministic, but bcrypt is not.
-    // Actually, Phase 1 says "Index: accessKey (unique)". 
-    // Wait, userSchema.generateAccessKey() sets `this.accessKey = key` and `this.accessKeyHash = bcrypt(key)`.
-    // It's a plain text search. Let's find by accessKey or hash.
+    const cached = accessKeyCache.get(apiKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      req.user = cached.user;
+      req.__authCacheHit = true;
+      req.__authTimingMs = Date.now() - authStart;
+      return next();
+    }
 
-    // If accessKey is just stored in DB as cleartext too (as per Phase 1), we can find it:
-    let user = await User.findOne({ accessKey: apiKey });
+    const user = await User.findOne({ accessKey: apiKey })
+      .select('_id email role displayName accessKey activeProviderId')
+      .lean();
     
-    // Fallback if we only store hash (in production you'd only store hash and ID in the key, e.g. "sk-<userId>-<random>")
-    // If not found by accessKey, we'd have to find it another way, but for now:
     if (user) {
+      accessKeyCache.set(apiKey, {
+        user,
+        expiresAt: Date.now() + ACCESS_KEY_CACHE_TTL_MS,
+      });
       req.user = user;
+      req.__authCacheHit = false;
+      req.__authTimingMs = Date.now() - authStart;
       return next();
     }
     

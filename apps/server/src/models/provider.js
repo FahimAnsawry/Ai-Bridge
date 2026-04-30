@@ -7,6 +7,12 @@ const providerSchema = new mongoose.Schema({
   baseUrl: String,
   apiKey: String,
   apiKeys: { type: [String], default: [] },
+  copilotAuth: {
+    githubAccessToken: String,
+    copilotToken: String,
+    copilotTokenExp: { type: Number, default: 0 },
+    updatedAt: Date,
+  },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
