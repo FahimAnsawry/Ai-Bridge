@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository contains an AI proxy server and React dashboard. Backend code lives in `apps/server/src`, organized by `config`, `middlewares`, `models`, `routes`, `services`, and `utils`. The frontend lives in `apps/client/src`, with pages under `pages`, reusable UI under `components`, shared API helpers under `api`, and static assets under `assets` and `public`. Root-level `api/index.js` and `vercel.json` support Vercel deployment. Operational notes and task history are in `README.md`, `DEPLOYMENT.md`, `plans/`, and `checkpoints/`.
+This repository contains a local AI proxy server and React dashboard. Backend code lives in `apps/server/src`, organized by `config`, `middlewares`, `models`, `routes`, `services`, and `utils`. The frontend lives in `apps/client/src`, with pages under `pages`, reusable UI under `components`, shared API helpers under `api`, and static assets under `assets` and `public`. Operational notes live in `README.md`.
 
 ## Build, Test, and Development Commands
 
@@ -11,12 +11,12 @@ This repository contains an AI proxy server and React dashboard. Backend code li
 - `npm run dev`: run the Express server and Vite client together.
 - `npm start`: start only the backend from `apps/server/src/index.js`.
 - `npm run client`: start only the Vite frontend.
-- `npm run build`: install client dev dependencies and build the Vite app for deployment.
+- `npm run build`: build the Vite dashboard.
 - `node --check apps/server/src/index.js`: quick syntax check for the server entry point.
 
 ## Coding Style & Naming Conventions
 
-Use JavaScript throughout. The server is CommonJS (`require`, `module.exports`); the client is ESM React (`import`, JSX). Match existing two-space indentation and semicolon usage in nearby files. Use PascalCase for React components and page files, camelCase for functions and variables, and descriptive kebab-case for plan or checkpoint Markdown files. Keep route handlers thin and place provider/auth/proxy behavior in `services`.
+Use JavaScript throughout. The server is CommonJS (`require`, `module.exports`); the client is ESM React (`import`, JSX). Match existing two-space indentation and semicolon usage in nearby files. Use PascalCase for React components and page files, camelCase for functions and variables, and descriptive kebab-case for Markdown files. Keep route handlers thin and place provider/auth/proxy behavior in `services`.
 
 ## Testing Guidelines
 
@@ -28,4 +28,4 @@ Recent commits use Conventional Commit-style prefixes, especially `fix:`. Contin
 
 ## Security & Configuration Tips
 
-Do not commit real secrets from `.env` or `.env.local`; use `.env.example` for documented placeholders. Treat API keys, session secrets, OAuth credentials, MongoDB URLs, and provider tokens as sensitive. Prefer configuration through environment variables or the dashboard settings flow, and verify public deployments restrict CORS and use TLS as described in `DEPLOYMENT.md`.
+Do not commit real secrets from `.env` or `.env.local`; use `.env.example` for documented placeholders. Treat API keys, session secrets, OAuth credentials, MongoDB URLs, and provider tokens as sensitive. Prefer configuration through environment variables or the dashboard settings flow.

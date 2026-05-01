@@ -22,15 +22,11 @@ npm install
 
 ### Step 2: Install Client Dependencies
 
-Next, you'll need to install the dependencies for the React frontend. Navigate to the `client` directory and install them:
+Next, install the dependencies for the React frontend:
 
 ```bash
-cd client
-npm install
-cd ..
+npm install --prefix apps/client
 ```
-
-*Note: Alternatively, you can run `npm install --prefix client` from the root directory.*
 
 ### Step 3: Run the Application
 
@@ -44,7 +40,7 @@ npm run dev
 
 This command executes two scripts at the same time:
 1. `npm run start` - Starts the backend Express server on `http://localhost:3000`.
-2. `npm run client` - Starts the Vite React dashboard on the default Vite port (usually `http://localhost:5173` or `5175`).
+2. `npm run client` - Starts the Vite React dashboard on `http://localhost:5174`.
 
 ### Step 4: Access the Dashboard
 
@@ -52,39 +48,6 @@ Once the services are active, check your terminal for the exact Vite frontend UR
 - **Overview**: See server status and traffic charts.
 - **Settings**: Manage your upstream provider settings, including SwiftRouter's OpenAI-compatible base URL and API key, plus your local intercept key.
 - **Logs**: Monitor incoming AI proxy requests in real-time.
-
-## Deploying For Other Users
-
-The server is local-only by default. To make it reachable from other machines, start it with a public bind host and a public hostname or IP.
-
-### Example on a VPS or cloud host
-
-1. Install dependencies:
-
-```bash
-npm install
-npm install --prefix client
-cd client && npm run build && cd ..
-```
-
-2. Start the server with a public bind address:
-
-```bash
-HOST=0.0.0.0 PUBLIC_HOST=your-domain-or-server-ip npm start
-```
-
-3. Open the firewall or security-group ports you use for the app.
-
-4. Point clients at `http://your-domain-or-server-ip:3000/v1`.
-
-5. If you want the dashboard available too, open the web UI port shown in the console output or put it behind a reverse proxy like Nginx/Caddy.
-
-### Recommended production setup
-
-- Use a reverse proxy with TLS in front of the Node process.
-- Keep `config.json` on persistent storage.
-- Set a strong `local_api_key` before exposing the server publicly.
-- Restrict `cors_origins` instead of leaving it as `*` if the server is public.
 
 ### Configuration file (`config.json`)
 

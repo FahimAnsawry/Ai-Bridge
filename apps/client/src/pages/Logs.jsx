@@ -7,8 +7,6 @@ import ConfirmationModal from '../components/common/ConfirmationModal';
 import { Download, Trash2, Search, Wifi, WifiOff, Table, Terminal as TerminalIcon } from 'lucide-react';
 import { fetchLogs, clearLogs as apiClearLogs } from '../api';
 
-const SOCKET_URL = 'http://localhost:3002';
-
 const PANEL_STYLE = {
   background: 'var(--color-bg-panel)',
   border: '1px solid var(--color-glass-border)',
@@ -40,7 +38,7 @@ const Logs = ({ user }) => {
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    const socket = io({ transports: ['websocket', 'polling'] });
     socketRef.current = socket;
     socket.on('connect', () => {
       setConnected(true);
@@ -205,7 +203,7 @@ const Logs = ({ user }) => {
         </div>
       </motion.section>
 
-      {/* Render Area */}
+      {/* Content Area */}
       <motion.section
         custom={2} variants={fadeUp} initial="hidden" animate="visible"
         className="rounded-[--radius-lg] overflow-hidden relative"

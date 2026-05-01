@@ -99,10 +99,15 @@ const DEFAULT_CLAUDE_FALLBACK_MAPPINGS = {
   'claude-3-5-sonnet-20241022': DEFAULT_CLAUDE_FALLBACK_MODEL,
 };
 
-function applyDefaultClaudeFallbackMappings(modelMapping) {
+const PROTECTED_IDENTITY_MAPPINGS = {
+  'gemini-3-flash-preview': 'gemini-3-flash-preview',
+};
+
+function normalizeModelMapping(modelMapping) {
   const normalized = {
     ...(modelMapping || {}),
     ...DEFAULT_CLAUDE_FALLBACK_MAPPINGS,
+    ...PROTECTED_IDENTITY_MAPPINGS,
   };
 
   for (const [modelId, mappedModel] of Object.entries(normalized)) {
@@ -207,7 +212,7 @@ async function loadConfig(userId, options = {}) {
   const modelMapping = cfg.modelMapping
     ? (cfg.modelMapping instanceof Map ? Object.fromEntries(cfg.modelMapping) : cfg.modelMapping)
     : { ...DEFAULTS.model_mapping };
-  const normalizedModelMapping = applyDefaultClaudeFallbackMappings(modelMapping);
+  const normalizedModelMapping = normalizeModelMapping(modelMapping);
 
   const providers = providerDocs.length > 0
     ? providerDocs.map(p => ({
