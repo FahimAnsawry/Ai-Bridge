@@ -28,7 +28,7 @@ const httpAgent = new http.Agent({
   keepAlive: true,
   maxSockets: 50,
   maxFreeSockets: 10,
-  timeout: 60000,
+  timeout: 300000,
   freeSocketTimeout: 30000,
 });
 
@@ -36,7 +36,7 @@ const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 50,
   maxFreeSockets: 10,
-  timeout: 60000,
+  timeout: 300000,
   freeSocketTimeout: 30000,
 });
 
@@ -492,6 +492,104 @@ function normalizeToolChoice(toolChoice) {
   return toolChoice;
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function flattenMessageContentForNvidiaNim(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (content === null || content === undefined) {
+    return ' ';
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (!block || typeof block !== 'object') return '';
+        if (typeof block.text === 'string') return block.text;
+        if (typeof block.input_text === 'string') return block.input_text;
+        if (typeof block.content === 'string') return block.content;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    return text || ' ';
+  }
+
+  if (typeof content === 'object') {
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return String(content);
+    }
+  }
+
+  return String(content);
+}
+
+function sanitizeNvidiaNimRequestBody(bodyData) {
+  if (!bodyData || typeof bodyData !== 'object') return bodyData;
+
+  delete bodyData.tools;
+  delete bodyData.tool_choice;
+  delete bodyData.parallel_tool_calls;
+
+  const unsupportedObjectFields = [
+    'response_format',
+    'stream_options',
+    'prediction',
+    'logit_bias',
+    'extra_body',
+    'extra_headers',
+    'web_search_options',
+    'reasoning',
+    'audio',
+  ];
+  unsupportedObjectFields.forEach((field) => {
+    delete bodyData[field];
+  });
+
+  if (isPlainObject(bodyData.stop)) {
+    delete bodyData.stop;
+  }
+
+  if (Array.isArray(bodyData.messages)) {
+    bodyData.messages = bodyData.messages
+      .map((message) => {
+        if (!message || typeof message !== 'object') return message;
+        if (message.role === 'tool') return null;
+        const hadToolCall = Array.isArray(message.tool_calls) || Boolean(message.function_call);
+
+        const cleaned = {
+          ...message,
+          content: flattenMessageContentForNvidiaNim(message.content),
+        };
+
+        delete cleaned.tool_calls;
+        delete cleaned.function_call;
+
+        if (hadToolCall && !String(cleaned.content || '').trim()) {
+          return null;
+        }
+
+        return cleaned;
+      })
+      .filter(Boolean);
+
+    if (!bodyData.messages.some((message) => message?.role === 'user')) {
+      bodyData.messages.push({ role: 'user', content: 'Please continue.' });
+    }
+  }
+
+  return bodyData;
+}
+
 /**
  * normalizeSystemPrompt — Converts Anthropic-style `system` into an
  * OpenAI-compatible system message for non-Anthropic upstreams.
@@ -790,6 +888,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   const isAnthropic = baseUrl.includes('anthropic.com');
   const isEcom = baseUrl.includes('ecom');
   const isCopilotBridge = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
+  const isNvidiaNimRequest = req.__startedOnNvidiaNim === true || isNvidiaNimValue(baseUrl);
   if (isCopilotBridge) {
     headers['x-ai-bridge-upstream-hop'] = '1';
   }
@@ -885,6 +984,10 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
       'thinking', 'betas', 'top_k', 'context_management', 'output_config', 'metadata'
     ];
     FIELDS_TO_REMOVE.forEach(f => delete bodyData[f]);
+
+    if (isNvidiaNimRequest) {
+      sanitizeNvidiaNimRequestBody(bodyData);
+    }
   }
 
   // EcomAgent only supports: claude-opus-4-6, claude-opus-4.6, mmodel, claudex-4.7-5.4
@@ -933,7 +1036,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     data: bodyData,
     responseType: 'stream',
     decompress: true,
-    timeout: 120_000,
+    timeout: 300_000,
     params: req.query,
     httpAgent: agent === httpAgent ? agent : undefined,
     httpsAgent: agent === httpsAgent ? agent : undefined,
@@ -991,6 +1094,29 @@ function attemptLabel(req) {
   return ` (attempt ${state.usedAttempts}/${state.maxAttempts})`;
 }
 
+function isNvidiaNimValue(value) {
+  if (!value || typeof value !== 'string') return false;
+  const normalized = value.toLowerCase();
+  return normalized.includes('nvidia') ||
+    normalized.includes('nvdia') ||
+    normalized.includes('nim');
+}
+
+function isNvidiaNimProvider(provider) {
+  if (!provider || typeof provider !== 'object') return false;
+  return isNvidiaNimValue(provider.id) ||
+    isNvidiaNimValue(provider.name) ||
+    isNvidiaNimValue(provider.baseUrl);
+}
+
+function normalizeRemovedClaudeHaikuModel(model) {
+  if (!model || typeof model !== 'string') return model;
+  if (/^claude(?:\s+|-)haiku(?:\s+|-)4[.-]5(?:-[\w.-]+)?$/i.test(model)) {
+    return 'claude-sonnet-4-6';
+  }
+  return model;
+}
+
 /**
  * Proxy middleware factory.
  * Forwards the request to upstream and streams the response back.
@@ -1017,6 +1143,12 @@ async function proxyRequest(req, res) {
   const config = await loadConfig(userId, { includeCatalogs: req.path === '/models' });
   timing.configMs = Date.now() - configStart;
   const attemptState = initializeAttemptState(req, config);
+  if (req.body?.model) {
+    const normalizedModel = normalizeRemovedClaudeHaikuModel(req.body.model);
+    if (normalizedModel !== req.body.model) {
+      req.body.model = normalizedModel;
+    }
+  }
   const requestedModel = req.body?.model || 'unknown';
 
   const optimizationEnabled = config.token_optimization_enabled === true;
@@ -1195,6 +1327,13 @@ async function proxyRequest(req, res) {
     return hasBaseUrl && hasApiKey;
   };
 
+  const configuredActiveProvider = eligibleProviders.find((p) => p.id === config.active_provider_id) || null;
+  const configuredActiveProviderIsNvidiaNim = isNvidiaNimProvider(configuredActiveProvider);
+  const requestedModelForProvider = req.body?.model || '';
+  const requestedModelIsClaude = /^claude(?:[-.\s]|$)/i.test(requestedModelForProvider);
+  const firstUsableNonNvidiaProvider = eligibleProviders.find(
+    (p) => hasUsableProvider(p) && !isNvidiaNimProvider(p)
+  );
   let providerToUseId = config.active_provider_id;
 
   // req.__currentProviderId carries provider IDs set during auto-switch or
@@ -1202,7 +1341,9 @@ async function proxyRequest(req, res) {
   // "undo" an automatic recovery decision.
   if (req.__currentProviderId) {
     providerToUseId = req.__currentProviderId;
-  } else if (clientRequestedProviderId) {
+  } else if (configuredActiveProviderIsNvidiaNim && requestedModelIsClaude && firstUsableNonNvidiaProvider) {
+    providerToUseId = firstUsableNonNvidiaProvider.id;
+  } else if (clientRequestedProviderId && !configuredActiveProviderIsNvidiaNim) {
     // Try to match by provider ID first, then by baseUrl suffix.
     const matchById = eligibleProviders.find(
       (p) => p.id === clientRequestedProviderId
@@ -1222,9 +1363,15 @@ async function proxyRequest(req, res) {
 
   const providerById = eligibleProviders.find((p) => p.id === providerToUseId) || null;
   const firstUsableProvider = eligibleProviders.find(hasUsableProvider) || null;
+  
+  const isNvidiaNimActive = isNvidiaNimProvider(providerById);
+
   const activeProvider = providerById && hasUsableProvider(providerById)
     ? providerById
-    : (firstUsableProvider || providerById || eligibleProviders[0] || null);
+    : (isNvidiaNimActive ? providerById : (firstUsableProvider || providerById || eligibleProviders[0] || null));
+  const requestStartedOnNvidiaNim = isNvidiaNimProvider(activeProvider);
+  req.__startedOnNvidiaNim = requestStartedOnNvidiaNim;
+    
   let upstreamProvider = activeProvider;
   let providerName = activeProvider ? activeProvider.name : 'unknown';
 
@@ -1268,7 +1415,7 @@ async function proxyRequest(req, res) {
   // use that provider instead of the active one (allows per-model routing).
   // Note: We skip routing if we are in the middle of an auto-switch retry.
   const requestedModelForRouting = req.body?.model || '';
-  if (!req.__currentProviderId && config.model_routing && typeof config.model_routing === 'object') {
+  if (!requestStartedOnNvidiaNim && !req.__currentProviderId && config.model_routing && typeof config.model_routing === 'object') {
     // Check exact match first, then prefix match (e.g. "gemini" covers all gemini-* models)
     const routeUrl =
       config.model_routing[requestedModelForRouting] ||
@@ -1335,10 +1482,44 @@ async function proxyRequest(req, res) {
 
   const originalModel = targetModel;
   const isCopilotProvider = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
-  if (!isCopilotProvider && config.model_mapping && config.model_mapping[targetModel]) {
+  const isNvidiaNimUpstream = requestStartedOnNvidiaNim ||
+    isNvidiaNimProvider(upstreamProvider) ||
+    isNvidiaNimValue(providerName) ||
+    isNvidiaNimValue(baseUrl);
+
+  if (isNvidiaNimUpstream && (!targetModel || targetModel === 'unknown' || /^claude[-.]/i.test(targetModel))) {
+    const message = `NVIDIA NIM is active, but the client requested "${targetModel}". Set the client model to an NVIDIA NIM model id; the proxy will not substitute a default model.`;
+    console.warn(`[proxy] ${message}`);
+
+    if (req.path.includes('/messages')) {
+      return res.status(400).json({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message,
+        },
+      });
+    }
+
+    return res.status(400).json({
+      error: {
+        message,
+        type: 'invalid_request_error',
+        code: 'invalid_nvidia_nim_model',
+      },
+    });
+  }
+
+  if (!isCopilotProvider && !isNvidiaNimUpstream && config.model_mapping && config.model_mapping[targetModel]) {
     targetModel = config.model_mapping[targetModel];
     if (req.body) req.body.model = targetModel;
     // console.log(`[proxy] Mapping: ${originalModel} → ${targetModel}`);
+  }
+
+  const normalizedRemovedModel = normalizeRemovedClaudeHaikuModel(targetModel);
+  if (normalizedRemovedModel !== targetModel) {
+    targetModel = normalizedRemovedModel;
+    if (req.body) req.body.model = targetModel;
   }
 
   // ── EcomAgent early model normalisation ───────────────────────────────────
@@ -1363,80 +1544,6 @@ async function proxyRequest(req, res) {
   }
 
   const isStreaming = req.body?.stream === true;
-
-  function pickFallbackModel(blockedModel, requestedModel) {
-    const mapping = config.model_mapping && typeof config.model_mapping === 'object'
-      ? config.model_mapping
-      : {};
-      const customModels = Array.isArray(config.model_catalogs)
-        ? config.model_catalogs.reduce((acc, cat) => acc.concat(cat.models || []), []).map(m => m.id).filter(Boolean)
-        : [];
-
-    const isClaudeRequest = String(requestedModel || blockedModel || '').toLowerCase().startsWith('claude');
-    const defaultFallbackModel = 'claude-haiku-4.5';
-
-    const claudeCandidates = [
-      defaultFallbackModel,
-      'claude-haiku-4-5-20251001',
-      'claude-opus-4-7',
-      'claude-opus-4-6',
-      'claude-sonnet-4-6',
-      'claude-3-7-sonnet-20250219',
-      'claude-3-5-sonnet-20241022',
-    ];
-
-    const candidates = isClaudeRequest
-      ? [
-          requestedModel,
-          defaultFallbackModel,
-          mapping[defaultFallbackModel],
-          mapping['claude-haiku-4-5-20251001'],
-          ...claudeCandidates,
-          mapping[requestedModel],
-          mapping['claude-opus-4-7'],
-          mapping['claude-opus-4-6'],
-          mapping['claude-sonnet-4-6'],
-          mapping['claude-3-7-sonnet-20250219'],
-          mapping['claude-3-5-sonnet-20241022'],
-          ...customModels,
-        ]
-      : [
-          requestedModel,
-          mapping[requestedModel],
-          defaultFallbackModel,
-          mapping[defaultFallbackModel],
-          ...Object.values(mapping),
-          ...customModels,
-        ];
-
-    const resolveMappedModel = (modelId) => mapping[modelId] || modelId;
-    const blockedResolvedModel = resolveMappedModel(blockedModel);
-
-    const familyMatchers = [
-      { name: 'zhipu', test: (s) => /(chatglm|glm|zhipu)/i.test(s) },
-      { name: 'deepseek', test: (s) => /deepseek/i.test(s) },
-      { name: 'qwen', test: (s) => /qwen/i.test(s) },
-      { name: 'gpt', test: (s) => /(^|[^a-z])(gpt|o1|o3|o4)([^a-z]|$)/i.test(s) },
-      { name: 'claude', test: (s) => /claude/i.test(s) },
-    ];
-
-    const referenceModel = String(requestedModel || blockedModel || '');
-    const matchedFamily = familyMatchers.find((family) => family.test(referenceModel));
-    const shouldRestrictToFamily = !isClaudeRequest && !!matchedFamily;
-
-    const seenResolvedModels = new Set([blockedResolvedModel]);
-    for (const modelId of candidates.filter(Boolean)) {
-      const resolvedModel = resolveMappedModel(modelId);
-      if (shouldRestrictToFamily && !matchedFamily.test(String(resolvedModel))) {
-        continue;
-      }
-      if (seenResolvedModels.has(resolvedModel)) continue;
-      seenResolvedModels.add(resolvedModel);
-      return modelId;
-    }
-
-    return null;
-  }
 
   // ── Optional Stub: short-circuit selected models when explicitly configured ──
   const stubModels = Array.isArray(config.stub_models) ? config.stub_models : [];
@@ -1892,12 +1999,20 @@ async function proxyRequest(req, res) {
       const failedProvider = upstreamProvider || activeProvider;
       if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
 
-      const nextProvider = eligibleProviders.find((p) => {
-        const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
-        const hasKey = p.apiKey || (p.apiKeys && p.apiKeys.length > 0);
-        const isSameProvider = failedProvider?.id && p.id === failedProvider.id;
-        return hasBaseUrl && hasKey && !isSameProvider && !req.__triedProviders.has(p.id);
-      });
+      const isNvidiaNim = req.__startedOnNvidiaNim === true ||
+        isNvidiaNimProvider(activeProvider) ||
+        isNvidiaNimProvider(upstreamProvider) ||
+        isNvidiaNimValue(providerName) ||
+        isNvidiaNimValue(baseUrl);
+
+      const nextProvider = isNvidiaNim
+        ? null
+        : eligibleProviders.find((p) => {
+            const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
+            const hasKey = p.apiKey || (p.apiKeys && p.apiKeys.length > 0);
+            const isSameProvider = failedProvider?.id && p.id === failedProvider.id;
+            return hasBaseUrl && hasKey && !isSameProvider && !req.__triedProviders.has(p.id);
+          });
       
       if (nextProvider) {
         if (!canRetry(req)) {
@@ -1915,23 +2030,8 @@ async function proxyRequest(req, res) {
         );
       }
 
-      // 2. Fallback Model: If ALL providers failed for this model, try a different model
-      if (!req.__fallbackRetried) {
-        const fallbackModel = pickFallbackModel(blockedModel, originalModel);
-
-        if (fallbackModel) {
-          if (!canRetry(req)) {
-            console.warn(`[proxy] Fallback-model retry skipped: attempt budget exhausted${attemptLabel(req)}`);
-          } else {
-            console.warn(`[proxy] All providers denied model ${blockedModel}; retrying with fallback model ${fallbackModel}${attemptLabel(req)}`);
-            req.__fallbackRetried = true;
-            req.__triedProviders = new Set(); // Reset tried providers for the new model
-            delete req.__currentProviderId;
-            req.body.model = fallbackModel;
-            return proxyRequest(req, res);
-          }
-        }
-      }
+      // No fallback model substitution: return the provider error if the requested
+      // model is unavailable after same-model provider failover.
     }
 
     await addLog({

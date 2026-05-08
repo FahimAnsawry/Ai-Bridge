@@ -33,6 +33,10 @@ function inferProviderFromId(id = '') {
   return 'Unknown';
 }
 
+function isRemovedClaudeHaikuModel(id = '') {
+  return /^claude(?:\s+|-)haiku(?:\s+|-)4[.-]5(?:-[\w.-]+)?$/i.test(String(id));
+}
+
 function inferCategory(model, id = '') {
   const s = String(id).toLowerCase();
 
@@ -80,7 +84,7 @@ function normalizeModels(rawModels) {
 
   for (const item of rawModels) {
     const id = typeof item === 'string' ? item : item?.id || item?.model || '';
-    if (!id || seen.has(id)) continue;
+    if (!id || seen.has(id) || isRemovedClaudeHaikuModel(id)) continue;
     seen.add(id);
 
     const ownedBy =
@@ -108,7 +112,7 @@ function mergeCustomModels(syncedModels, existingModels) {
   }
 
   for (const model of Array.isArray(existingModels) ? existingModels : []) {
-    if (!model || !model.id || seen.has(model.id)) continue;
+    if (!model || !model.id || seen.has(model.id) || isRemovedClaudeHaikuModel(model.id)) continue;
     seen.add(model.id);
     merged.push(model);
   }

@@ -22,6 +22,16 @@ const { estimatePromptTokens } = require('../utils/token-budget');
 
 const router = express.Router();
 
+const GATEWAY_MODELS = [
+  { id: 'moonshotai/kimi-k2.6', owned_by: 'moonshot' },
+  { id: 'deepseek-ai/deepseek-v4-pro', owned_by: 'deepseek' },
+  { id: 'qwen/qwen3.5-397b-a17b', owned_by: 'qwen' },
+  { id: 'minimaxai/minimax-m2.7', owned_by: 'minimax' },
+  { id: 'z-ai/glm-5.1', owned_by: 'z-ai' },
+  { id: 'gemini-3.1-pro-preview', owned_by: 'google' },
+  { id: 'deepseek-v4-flash', owned_by: 'deepseek' },
+];
+
 // All routes under /v1 require a valid local API key (now using requireAccessKey)
 router.use(requireAccessKey);
 
@@ -63,8 +73,27 @@ router.get('/messages/batches', proxyRequest);
 router.get('/messages/batches/:id', proxyRequest);
 
 // ── Models ────────────────────────────────────────────────────────────────────
-router.get('/models', proxyRequest);
-router.get('/models/:model', proxyRequest);
+router.get('/models', (req, res) => {
+  const created = Math.floor(Date.now() / 1000);
+  return res.json({
+    object: 'list',
+    data: GATEWAY_MODELS.map((model) => ({
+      id: model.id,
+      object: 'model',
+      created,
+      owned_by: model.owned_by,
+    })),
+  });
+});
+
+router.get('/models/:model', (req, res) => {
+  return res.json({
+    id: req.params.model,
+    object: 'model',
+    created: Date.now(),
+    owned_by: 'system'
+  });
+});
 
 // ── Embeddings ────────────────────────────────────────────────────────────────
 router.post('/embeddings', proxyRequest);

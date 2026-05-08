@@ -96,6 +96,20 @@ async function startStandaloneServer() {
   const bindHost = process.env.HOST || '127.0.0.1';
   const port = Number(process.env.PORT || 3000);
 
+  // Wait for MongoDB to connect if it's not ready yet
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await new Promise((resolve, reject) => {
+        if (mongoose.connection.readyState === 1) return resolve();
+        mongoose.connection.once('connected', resolve);
+        mongoose.connection.once('error', reject);
+        setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000);
+      });
+    } catch (e) {
+      console.warn('[server] Could not wait for MongoDB connection:', e.message);
+    }
+  }
+
   // Try to get the first admin user — but don't block startup if DB isn't ready
   let userId = 'default';
   if (mongoose.connection.readyState === 1) {

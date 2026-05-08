@@ -35,13 +35,15 @@ const DEFAULTS = {
     'kimi-k2.5': 'kimi-k2.5',
     'kimi-k2': 'kimi-k2.5',
     'kimi': 'kimi-k2.5',
-    'claude-haiku-4.5': 'claude-haiku-4.5',
-    'claude-haiku-4-5-20251001': 'claude-haiku-4.5',
+    'moonshotai/kimi-k2.6': 'kimi-k2.6',
+    'deepseek-ai/deepseek-v4-pro': 'deepseek-v4-pro',
+    'qwen/qwen3.5-397b-a17b': 'qwen3.6-plus',
+    'minimaxai/minimax-m2.7': 'minimax-m2.7',
+    'z-ai/glm-5.1': 'glm-5.1',
     'claude-opus-4-6': 'claude-opus-4-6',
     'claude-sonnet-4-6': 'claude-sonnet-4-6',
     'claude-sonnet-4.6': 'claude-sonnet-4-6',
     'claude-opus-4.6': 'claude-opus-4-6',
-    'claude-3-5-sonnet-20241022': 'claude-haiku-4.5',
     'glm-5.1': 'glm-5.1',
     'kimi-k2.6': 'kimi-k2.6',
     'minimax-m2.7': 'minimax-m2.7',
@@ -92,29 +94,26 @@ const DEFAULTS = {
   ]
 };
 
-const DEFAULT_CLAUDE_FALLBACK_MODEL = 'claude-haiku-4.5';
-const DEFAULT_CLAUDE_FALLBACK_MAPPINGS = {
-  'claude-haiku-4.5': DEFAULT_CLAUDE_FALLBACK_MODEL,
-  'claude-haiku-4-5-20251001': DEFAULT_CLAUDE_FALLBACK_MODEL,
-  'claude-3-5-sonnet-20241022': DEFAULT_CLAUDE_FALLBACK_MODEL,
-};
-
 const PROTECTED_IDENTITY_MAPPINGS = {
   'gemini-3-flash-preview': 'gemini-3-flash-preview',
 };
 
-function normalizeModelMapping(modelMapping) {
-  const normalized = {
-    ...(modelMapping || {}),
-    ...DEFAULT_CLAUDE_FALLBACK_MAPPINGS,
-    ...PROTECTED_IDENTITY_MAPPINGS,
-  };
+function isRemovedClaudeHaikuModel(value) {
+  if (!value || typeof value !== 'string') return false;
+  return /^claude(?:\s+|-)haiku(?:\s+|-)4[.-]5(?:-[\w.-]+)?$/i.test(value);
+}
 
-  for (const [modelId, mappedModel] of Object.entries(normalized)) {
-    if (/^claude/i.test(modelId) && mappedModel === 'deepseek-v3.2') {
-      normalized[modelId] = DEFAULT_CLAUDE_FALLBACK_MODEL;
+function normalizeModelMapping(modelMapping) {
+  const normalized = {};
+
+  for (const [modelId, mappedModel] of Object.entries(modelMapping || {})) {
+    if (isRemovedClaudeHaikuModel(modelId) || isRemovedClaudeHaikuModel(mappedModel)) {
+      continue;
     }
+    normalized[modelId] = mappedModel;
   }
+
+  Object.assign(normalized, PROTECTED_IDENTITY_MAPPINGS);
 
   return normalized;
 }
@@ -383,7 +382,7 @@ async function saveConfig(userId, updates) {
   if (updates.model_routing !== undefined) configUpdates.modelRouting = updates.model_routing;
   if (updates.active_provider_id !== undefined) configUpdates.activeProviderId = updates.active_provider_id;
   if (updates.model_mapping !== undefined) {
-    configUpdates.modelMapping = new Map(Object.entries(updates.model_mapping));
+    configUpdates.modelMapping = new Map(Object.entries(normalizeModelMapping(updates.model_mapping)));
   }
   if (updates.stub_models !== undefined) configUpdates.stubModels = updates.stub_models;
   if (updates.request_minimization_enabled !== undefined) {

@@ -2,7 +2,71 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-const backendTarget = process.env.VITE_API_TARGET || 'http://localhost:3001'
+const backendTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:3001'
+
+const benignProxySocketErrors = new Set([
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EPIPE',
+]);
+
+const isBenignProxyError = (err) => benignProxySocketErrors.has(err?.code);
+
+const ignoreBenignProxyErrors = (proxy) => {
+  if (!proxy || proxy.__aiBridgeProxyPatched) return;
+
+  proxy.__aiBridgeProxyPatched = true;
+  const originalOn = proxy.on.bind(proxy);
+
+  proxy.on = (event, listener) => {
+    if (event === 'error' && typeof listener === 'function') {
+      return originalOn(event, (err, req, res) => {
+        if (isBenignProxyError(err)) {
+          if (res && !('req' in res) && typeof res.end === 'function') {
+            res.end();
+          }
+          return;
+        }
+
+        listener(err, req, res);
+      });
+    }
+
+    return originalOn(event, listener);
+  };
+};
+
+const ignoreBenignSocketErrors = (socket) => {
+  if (!socket || socket.__aiBridgeProxySocketPatched) return;
+
+  socket.__aiBridgeProxySocketPatched = true;
+  const originalOn = socket.on.bind(socket);
+
+  socket.on = (event, listener) => {
+    if (event === 'error' && typeof listener === 'function') {
+      return originalOn(event, (err) => {
+        if (isBenignProxyError(err)) return;
+        listener(err);
+      });
+    }
+
+    return originalOn(event, listener);
+  };
+};
+
+const configureProxy = (proxy) => {
+  ignoreBenignProxyErrors(proxy);
+  proxy.on('error', () => {});
+};
+
+const configureWebSocketProxy = (proxy) => {
+  configureProxy(proxy);
+  proxy.on('proxyReqWs', (proxyReq, req, socket) => {
+    proxyReq.on('error', () => {});
+    ignoreBenignSocketErrors(socket);
+  });
+};
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -12,31 +76,23 @@ export default defineConfig({
       '/api': {
         target: backendTarget,
         changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('error', () => {}); // suppress ECONNREFUSED on server startup
-        },
+        configure: configureProxy,
       },
       '/auth': {
         target: backendTarget,
         changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('error', () => {});
-        },
+        configure: configureProxy,
       },
       '/copilot': {
         target: backendTarget,
         changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('error', () => {});
-        },
+        configure: configureProxy,
       },
       '/socket.io': {
         target: backendTarget,
         changeOrigin: true,
         ws: true,
-        configure: (proxy) => {
-          proxy.on('error', () => {});
-        },
+        configure: configureWebSocketProxy,
       },
     },
   },
