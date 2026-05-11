@@ -7,7 +7,7 @@ import PublicNavbar from '../components/layout/PublicNavbar';
 const highlights = [
   {
     title: 'Provider Abstraction',
-    description: 'Keep one client integration while choosing providers and model mapping from your control panel.',
+    description: 'Keep one client integration while choosing providers from your control panel.',
     icon: Route,
   },
   {

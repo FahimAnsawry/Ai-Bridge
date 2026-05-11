@@ -33,6 +33,16 @@ function getInitialMemoryStats() {
   };
 }
 
+function getLogTokenTotal(entry = {}) {
+  const explicitTotal = Number(entry.totalTokens);
+  if (Number.isFinite(explicitTotal) && explicitTotal >= 0) return explicitTotal;
+
+  const promptTokens = Number(entry.promptTokens);
+  const completionTokens = Number(entry.completionTokens);
+  return (Number.isFinite(promptTokens) && promptTokens >= 0 ? promptTokens : 0)
+    + (Number.isFinite(completionTokens) && completionTokens >= 0 ? completionTokens : 0);
+}
+
 /** Attach the Socket.io instance so we can emit events. */
 function attachSocketIO(io) {
   _io = io;
@@ -69,7 +79,7 @@ async function addLog(entry, userId, accessKey) {
   if (!memoryStats.has(uIdStr)) memoryStats.set(uIdStr, getInitialMemoryStats());
   const stats = memoryStats.get(uIdStr);
   stats.totalRequests++;
-  stats.totalTokens += (entry.promptTokens || 0) + (entry.completionTokens || 0);
+  stats.totalTokens += getLogTokenTotal(entry);
   if (entry.status >= 400) stats.errors++;
   stats.sumLatency += (entry.latencyMs || 0);
 

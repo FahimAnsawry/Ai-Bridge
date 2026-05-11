@@ -213,11 +213,14 @@ function createProxyRuntime(options = {}) {
     const targetUserId = options.userId || userId;
     if (!targetUserId || targetUserId === 'default') throw new Error('Cannot sync models without a real userId (DB not connected)');
     try {
-      const result = await syncSwiftRouterModels(targetUserId, { persist: options.persist !== false });
+      const result = await syncSwiftRouterModels(targetUserId, {
+        persist: options.persist !== false,
+        providerId: options.providerId,
+      });
       lastSync = {
         success: true,
         at: new Date().toISOString(),
-        message: `Synced ${result.syncedModels} models from SwiftRouter.`,
+        message: `Synced ${result.syncedModels} models from ${result.provider?.name || result.provider?.id || 'provider'}.`,
       };
       await emitState();
       return result;

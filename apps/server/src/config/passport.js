@@ -57,7 +57,7 @@ passport.use(new GoogleStrategy({
           port: DEFAULTS.port,
           corsOrigins: DEFAULTS.cors_origins,
           modelRouting: DEFAULTS.model_routing,
-          modelMapping: DEFAULTS.model_mapping,
+          activeModelId: DEFAULTS.active_model_id,
           stubModels: DEFAULTS.stub_models
         },
         providers: []
@@ -73,9 +73,9 @@ passport.use(new GoogleStrategy({
           port: DEFAULTS.port,
           corsOrigins: DEFAULTS.cors_origins,
           modelRouting: DEFAULTS.model_routing,
-          modelMapping: new Map(Object.entries(DEFAULTS.model_mapping)),
           stubModels: DEFAULTS.stub_models,
-          activeProviderId: null
+          activeProviderId: null,
+          activeModelId: DEFAULTS.active_model_id
         });
 
         // No initial providers created on signup - user must add them manually

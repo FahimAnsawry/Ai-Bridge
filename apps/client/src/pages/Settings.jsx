@@ -1,17 +1,56 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, Zap, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut } from 'lucide-react';
+import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route } from 'lucide-react';
 import {
   fetchConfig,
   saveConfig,
   fetchAuthStatus,
+  fetchModels,
   fetchCopilotAuthStatus,
   startCopilotDeviceFlow,
   pollCopilotDeviceFlow,
   logoutCopilot,
 } from '../api';
-import AccessKeyDisplay from '../components/common/AccessKeyDisplay';
 import { useToast } from '../context/ToastContext';
+
+const DEFAULT_MODELS = [
+  { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
+  { id: 'gpt-5.2', name: 'GPT-5.2' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex' },
+  { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
+  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
+  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
+  { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen3.5 397B A17B' },
+  { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'z-ai/glm-5.1', name: 'GLM 5.1' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { id: 'glm-5.1', name: 'GLM 5.1' },
+  { id: 'grok-code-fast-1', name: 'Grok Code Fast 1' },
+  { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+  { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'qwen-3.6-plus', name: 'Qwen 3.6 Plus' },
+  { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+  { id: 'gpt-5.5', name: 'GPT-5.5' },
+  // NVIDIA Recommended
+  { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro' },
+  { id: 'deepseek-ai/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen3.5 397B A17B' },
+  { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B A35B Instruct' },
+  { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
+  { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'z-ai/glm-5.1', name: 'GLM 5.1' },
+  { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct' },
+  { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama 3.1 Nemotron 70B Instruct' }
+];
 
 // ── GitHub Copilot Auth Card ───────────────────────────────────────────────────
 function CopilotAuthCard({
@@ -145,7 +184,7 @@ function CopilotAuthCard({
   );
 
   return (
-    <div className={`bg-slate-950/50 border rounded-2xl p-5 space-y-4 transition-all ${isConnected ? 'border-emerald-700/40' : 'border-slate-800'}`}>
+    <div className={`glass border rounded-2xl p-4 space-y-3 transition-all duration-500 ${isConnected ? 'border-emerald-500/30 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)]' : 'border-slate-800 hover:border-indigo-500/30 hover:shadow-glow'}`}>
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
@@ -223,7 +262,7 @@ function CopilotAuthCard({
                   id="copilot-device-flow-btn"
                   onClick={startFlow}
                   disabled={submitting}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-[10px] font-bold rounded-xl transition-all active:scale-95 shadow-lg shadow-indigo-500/20 disabled:opacity-60 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-500 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-400 text-white text-[11px] font-bold rounded-xl transition-all active:scale-95 shadow-[0_0_20px_-5px_rgba(99,102,241,0.5)] disabled:opacity-60 cursor-pointer uppercase tracking-wider"
                 >
                   {submitting ? <Loader2 size={13} className="animate-spin" /> : <GitBranch size={13} />}
                   Connect
@@ -285,11 +324,12 @@ const Input = ({ label, type = 'text', ...props }) => {
   const isPassword = type === 'password';
   return (
     <div className="space-y-2">
-      {label && <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{label}</label>}
-      <div className="relative">
-        <input {...props} type={isPassword ? (show ? 'text' : 'password') : type} className="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:border-indigo-500/50 focus:outline-none transition-all cursor-text pr-10" />
+      {label && <label className="label-caps">{label}</label>}
+      <div className="relative group">
+        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-xl blur opacity-0 group-hover:opacity-20 transition duration-500"></div>
+        <input {...props} type={isPassword ? (show ? 'text' : 'password') : type} className="relative w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all cursor-text pr-10 font-mono" />
         {isPassword && (
-          <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-2 text-slate-500 hover:text-slate-300">
+          <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-2.5 text-slate-500 hover:text-indigo-400 transition-colors z-10">
             {show ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>}
           </button>
         )}
@@ -299,7 +339,7 @@ const Input = ({ label, type = 'text', ...props }) => {
 };
 
 const Card = ({ children, className = '' }) => (
-  <div className={`bg-slate-950/50 border border-slate-800 rounded-2xl p-6 ${className}`}>
+  <div className={`glass card-neon rounded-2xl p-6 transition-all duration-300 ${className}`}>
     {children}
   </div>
 );
@@ -308,6 +348,7 @@ const Settings = ({ user: initialUser }) => {
   const [form, setForm] = useState({
     local_api_key: '',
     active_provider_id: '',
+    model_routing: {},
     providers: [],
     port: 3000,
     token_optimization_enabled: false,
@@ -318,11 +359,26 @@ const Settings = ({ user: initialUser }) => {
   });
   const [user, setUser] = useState(initialUser);
   const [expandedIds, setExpandedIds] = useState({});
+  const [editingProviderId, setEditingProviderId] = useState(null);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [isAddRouteModalOpen, setIsAddRouteModalOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const modelDropdownRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const providerListRef = useRef(null);
   const [providerScrollState, setProviderScrollState] = useState({ top: false, bottom: false });
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target)) {
+        setIsModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const updateProviderScrollState = () => {
     const el = providerListRef.current;
@@ -334,23 +390,43 @@ const Settings = ({ user: initialUser }) => {
     });
   };
 
+  const [availableModels, setAvailableModels] = useState([]);
+
   useEffect(() => {
-    Promise.all([fetchConfig(), fetchAuthStatus()]).then(([cfg, authData]) => {
-      setForm({
-        local_api_key: cfg.local_api_key || authData.user?.accessKey || '',
-        active_provider_id: cfg.active_provider_id || '',
-        providers: cfg.providers || [],
-        port: cfg.port || 3000,
-        token_optimization_enabled: cfg.token_optimization_enabled === true,
-        prompt_budget_tokens: cfg.prompt_budget_tokens || 0,
-        token_summarization_enabled: cfg.token_summarization_enabled === true,
-        response_cache_enabled: cfg.response_cache_enabled === true,
-        response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
+    Promise.all([fetchConfig(), fetchAuthStatus(), fetchModels()])
+      .then(([cfg, authData, modelsRes]) => {
+        setForm({
+          local_api_key: cfg.local_api_key || authData.user?.accessKey || '',
+          active_provider_id: cfg.active_provider_id || '',
+          model_routing: cfg.model_routing && typeof cfg.model_routing === 'object' && !Array.isArray(cfg.model_routing) ? cfg.model_routing : {},
+          providers: cfg.providers || [],
+          port: cfg.port || 3000,
+          token_optimization_enabled: cfg.token_optimization_enabled === true,
+          prompt_budget_tokens: cfg.prompt_budget_tokens || 0,
+          token_summarization_enabled: cfg.token_summarization_enabled === true,
+          response_cache_enabled: cfg.response_cache_enabled === true,
+          response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
+        });
+        setUser(authData.user);
+        
+        // Merge fetched models with DEFAULT_MODELS
+        const fetched = modelsRes && modelsRes.data ? modelsRes.data : [];
+        const combined = [...fetched];
+        if (typeof DEFAULT_MODELS !== 'undefined') {
+          DEFAULT_MODELS.forEach(dm => {
+            if (!combined.find(m => m.id === dm.id)) {
+              combined.push({ id: dm.id, name: dm.name });
+            }
+          });
+        }
+        setAvailableModels(combined);
+        setLoading(false);
+        setExpandedIds({});
+      })
+      .catch((err) => {
+        console.error('[Settings] Failed to load config:', err);
+        setLoading(false);
       });
-      setUser(authData.user);
-      setLoading(false);
-      setExpandedIds({});
-    });
   }, []);
 
   useEffect(() => {
@@ -368,8 +444,60 @@ const Settings = ({ user: initialUser }) => {
 
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [newProviderForm, setNewProviderForm] = React.useState({ name: '', baseUrl: '', apiKey: '' });
+  const [newRouteForm, setNewRouteForm] = React.useState({ model: '', providerId: '' });
 
-  const isProviderSelected = (provider) => provider?.isActive !== false;
+  const normalizeBaseUrl = (value) => String(value || '').replace(/\/+$/, '');
+  const getModelRouting = (routing = form.model_routing) => (
+    routing && typeof routing === 'object' && !Array.isArray(routing) ? routing : {}
+  );
+  // All configured providers are available for model routes
+  const routeProviders = form.providers;
+  const getProviderForRouteTarget = (target) => routeProviders.find(
+    (provider) => provider.id === target || (provider.baseUrl && normalizeBaseUrl(provider.baseUrl) === normalizeBaseUrl(target))
+  );
+  const saveModelRouting = (routing) => {
+    const cleanRouting = Object.entries(routing).reduce((acc, [model, providerId]) => {
+      const key = String(model || '').trim();
+      const target = String(providerId || '').trim();
+      if (key && target) acc[key] = target;
+      return acc;
+    }, {});
+
+    setForm(prev => ({ ...prev, model_routing: cleanRouting }));
+    saveConfig({ model_routing: cleanRouting }).catch(err => showToast(err.message, 'error'));
+  };
+  const addModelRoute = () => {
+    const model = newRouteForm.model.trim();
+    const providerId = newRouteForm.providerId || routeProviders[0]?.id || '';
+    if (!model || !providerId) {
+      showToast('Model and provider are required.', 'error');
+      return;
+    }
+    saveModelRouting({ ...getModelRouting(), [model]: providerId });
+    setNewRouteForm({ model: '', providerId: '' });
+  };
+  const updateModelRouteProvider = (model, providerId) => {
+    saveModelRouting({ ...getModelRouting(), [model]: providerId });
+  };
+  const updateModelRouteKey = (oldModel, nextModel) => {
+    const model = nextModel.trim();
+    if (!model || model === oldModel) return model || oldModel;
+    const routing = getModelRouting();
+    if (routing[model] !== undefined) {
+      showToast('A route for that model already exists.', 'error');
+      return oldModel;
+    }
+    const nextRouting = { ...routing };
+    nextRouting[model] = nextRouting[oldModel];
+    delete nextRouting[oldModel];
+    saveModelRouting(nextRouting);
+    return model;
+  };
+  const removeModelRoute = (model) => {
+    const nextRouting = { ...getModelRouting() };
+    delete nextRouting[model];
+    saveModelRouting(nextRouting);
+  };
 
   const handleAddProvider = () => {
     if (!newProviderForm.name || !newProviderForm.baseUrl || !newProviderForm.apiKey) {
@@ -377,7 +505,8 @@ const Settings = ({ user: initialUser }) => {
       return;
     }
     const id = uid();
-    const newP = { id, ...newProviderForm, isActive: false };
+    // New providers are created with isActive: true so they're immediately available
+    const newP = { id, ...newProviderForm, isActive: true };
     const next = { ...form, providers: [...form.providers, newP] };
     setForm(next);
     saveConfig({ providers: next.providers });
@@ -440,41 +569,9 @@ const Settings = ({ user: initialUser }) => {
   const removeProvider = (id) => {
     setForm(prev => {
       const providers = prev.providers.filter(p => p.id !== id);
-      const fallbackProvider = providers.find(p => !isPopularProvider(p) && isProviderSelected(p)) || providers.find(isProviderSelected) || providers[0];
-      const next = {
-        ...prev,
-        providers,
-        active_provider_id: prev.active_provider_id === id ? (fallbackProvider?.id || '') : prev.active_provider_id,
-      };
-      saveConfig({
-        providers: next.providers,
-        active_provider_id: next.active_provider_id,
-        replace_providers: true,
-      });
+      const next = { ...prev, providers };
+      saveConfig({ providers: next.providers, replace_providers: true });
       return next;
-    });
-  };
-
-  const setActive = (p) => {
-    if (!p.baseUrl || (p.apiKeys?.length === 0 && !p.apiKey)) {
-      showToast('Base URL and at least one API Key are required.', 'error');
-      return;
-    }
-    const isPopular = isPopularProvider(p);
-    const providers = form.providers.map(provider => {
-      if (provider.id === p.id) return { ...provider, isActive: true };
-      if (!isPopular && !isPopularProvider(provider)) return { ...provider, isActive: false };
-      return provider;
-    });
-    const next = {
-      ...form,
-      providers,
-      active_provider_id: isPopular ? form.active_provider_id : p.id,
-    };
-    setForm(next);
-    saveConfig({
-      providers: next.providers,
-      active_provider_id: next.active_provider_id,
     });
   };
 
@@ -493,17 +590,9 @@ const Settings = ({ user: initialUser }) => {
       isActive: true,
     };
     const existingProviders = (form.providers || []).filter(p => p.id !== 'copilot');
-    const selectedCustomProvider = existingProviders.find(p => !isPopularProvider(p) && isProviderSelected(p));
-    const next = {
-      ...form,
-      providers: [...existingProviders, copilotProvider],
-      active_provider_id: selectedCustomProvider?.id || (form.active_provider_id === 'copilot' ? '' : form.active_provider_id),
-    };
+    const next = { ...form, providers: [...existingProviders, copilotProvider] };
     try {
-      await saveConfig({
-        providers: next.providers,
-        active_provider_id: next.active_provider_id,
-      });
+      await saveConfig({ providers: next.providers });
       setForm(next);
     } catch (err) {
       showToast(err.message, 'error');
@@ -530,128 +619,118 @@ const Settings = ({ user: initialUser }) => {
       );
     }
 
-    return providers.map(p => {
-      const isSelected = isProviderSelected(p);
-      const isDefault = form.active_provider_id === p.id;
-
-      return (
-        <div key={p.id} className={`p-3 rounded-xl border transition-all ${isSelected ? 'bg-emerald-950/20 border-emerald-800/50' : 'bg-slate-900 border-slate-800'}`}>
-          <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(p.id)}>
-            <div className="flex items-center gap-3 font-bold text-white text-[13px]">
-              {expandedIds[p.id] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              <span className="truncate max-w-[120px] sm:max-w-none">{p.name || 'Unnamed Provider'}</span>
-              {isSelected && <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full uppercase">{isDefault ? 'Active' : 'Selected'}</span>}
+    return providers.map(p => (
+      <div key={p.id} className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-indigo-500/30 hover:shadow-[0_0_20px_-5px_rgba(99,102,241,0.15)] group">
+        <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(p.id)}>
+          <div className="flex items-center gap-3 font-bold text-white text-[13px]">
+            <div className="p-1 rounded-md bg-slate-800/50 text-indigo-400 group-hover:bg-indigo-500/20 group-hover:text-indigo-300 transition-colors">
+              {expandedIds[p.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </div>
-            <div className="flex items-center gap-2">
-              {!isSelected && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setActive(p); }}
-                  className={`p-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-colors cursor-pointer flex items-center gap-1 ${!p.baseUrl || (p.apiKeys?.length === 0 && !p.apiKey) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'}`}
-                  title={!p.baseUrl || (p.apiKeys?.length === 0 && !p.apiKey) ? 'Requires Base URL and API Key' : 'Set as Active'}
-                >
-                  <Zap size={11} />
-                  <span className="hidden sm:inline">Select</span>
-                </button>
-              )}
-              <button type="button" onClick={(e) => { e.stopPropagation(); removeProvider(p.id); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 cursor-pointer">
-                <Trash2 size={12} />
-              </button>
-            </div>
+            <span className="truncate max-w-[120px] sm:max-w-none font-display tracking-tight text-sm">{p.name || 'Unnamed Provider'}</span>
+            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider shadow-[0_0_10px_-2px_rgba(16,185,129,0.2)]">Active</span>
           </div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); removeProvider(p.id); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+            <Trash2 size={13} />
+          </button>
+        </div>
 
-          <AnimatePresence>
-            {expandedIds[p.id] && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3 pt-3 border-t border-slate-800 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="sm:col-span-2">
-                    <Input value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" />
-                  </div>
-                  <Input value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" />
-                  <div className="sm:col-span-2">
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">API Keys</label>
-                      <div className="space-y-2">
-                        {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).map((key, idx) => (
-                          <div key={idx} className="flex gap-2">
-                            <div className="flex-1 relative">
-                              <input
-                                type="password"
-                                value={key}
-                                readOnly
-                                className="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-400 focus:outline-none"
-                              />
-                              <div className="absolute right-3 top-2.5 text-[8px] text-slate-600 font-mono">
-                                {key.slice(0, 4)}...{key.slice(-4)}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeProviderApiKey(p.id, idx)}
-                              className="p-2 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors"
-                              title="Remove Key"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+        <AnimatePresence>
+          {expandedIds[p.id] && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3 pt-3 border-t border-slate-800 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <Input value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" />
+                </div>
+                <Input value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" />
+                <div className="sm:col-span-2">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">API Keys</label>
+                    <div className="space-y-2">
+                      {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).map((key, idx) => (
+                        <div key={idx} className="flex gap-2">
+                          <div className="flex-1 relative">
+                            <input type="password" value={key} readOnly className="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-400 focus:outline-none" />
+                            <div className="absolute right-3 top-2.5 text-[8px] text-slate-600 font-mono">{key.slice(0, 4)}...{key.slice(-4)}</div>
                           </div>
-                        ))}
-                        <div className="flex gap-2">
-                          <div className="flex-1">
-                            <input
-                              type="password"
-                              placeholder="Add new API key..."
-                              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:border-indigo-500/50 focus:outline-none transition-all"
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  addProviderApiKey(p.id, e.target.value);
-                                  e.target.value = '';
-                                }
-                              }}
-                              onBlur={(e) => {
-                                if (e.target.value) {
-                                  addProviderApiKey(p.id, e.target.value);
-                                  e.target.value = '';
-                                }
-                              }}
-                            />
-                          </div>
-                          <div className="w-9 h-9 flex items-center justify-center text-slate-700">
-                            <Plus size={16} />
-                          </div>
+                          <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className="p-2 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors" title="Remove Key">
+                            <Trash2 size={14} />
+                          </button>
                         </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <input type="password" placeholder="Add new API key..." className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all font-mono"
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
+                            onBlur={(e) => { if (e.target.value) { addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
+                          />
+                        </div>
+                        <div className="w-9 h-9 flex items-center justify-center text-indigo-500/50"><Plus size={16} /></div>
                       </div>
                     </div>
                   </div>
                 </div>
-                <div className="flex justify-end">
-                  <button type="button" onClick={() => setActive(p)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold transition-colors uppercase tracking-widest cursor-pointer ${isSelected ? 'bg-emerald-500/20 text-emerald-400' : (!p.baseUrl || (p.apiKeys?.length === 0 && !p.apiKey) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-rose-950/30 text-rose-400 hover:bg-rose-950/50')}`}>
-                    <Zap size={11} /> {isSelected ? (isDefault ? 'Active' : 'Selected') : 'Select'}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    ));
+  };
+
+  const renderProviderGrid = (providers, emptyLabel) => {
+    if (providers.length === 0) {
+      return (
+        <div className="col-span-full rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-8 text-center text-slate-600">
+          <p className="text-xs font-medium">{emptyLabel}</p>
         </div>
       );
-    });
+    }
+
+    return providers.map(p => (
+      <div 
+        key={p.id} 
+        onClick={() => setEditingProviderId(p.id)}
+        className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-indigo-500/50 hover:shadow-[0_0_20px_-5px_rgba(99,102,241,0.25)] group cursor-pointer flex flex-col gap-3 min-h-[100px] justify-between relative overflow-hidden"
+      >
+        <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-cyan-500/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500"></div>
+        <div className="relative z-10 flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <span className="font-display font-bold text-white tracking-tight text-sm truncate">{p.name || 'Unnamed Provider'}</span>
+            <span className="text-[10px] text-slate-400 font-mono truncate">{p.baseUrl || 'No URL'}</span>
+          </div>
+          <button 
+            type="button" 
+            onClick={(e) => { e.stopPropagation(); removeProvider(p.id); }} 
+            className="p-1.5 shrink-0 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+        <div className="relative z-10 flex items-center justify-between mt-2 pt-2 border-t border-slate-800/50">
+          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider shadow-[0_0_10px_-2px_rgba(16,185,129,0.2)]">Active</span>
+          <div className="text-[10px] text-slate-500 font-mono">
+            {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).length} keys
+          </div>
+        </div>
+      </div>
+    ));
   };
 
   if (loading) return <div className="text-center py-20 text-slate-500">Loading Configuration...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto h-full flex flex-col py-6 lg:py-4 px-6 space-y-6 lg:space-y-4 overflow-hidden">
-      <header className="shrink-0 space-y-1">
-        <h1 className="text-3xl font-extrabold text-white tracking-tight">System Settings</h1>
-        <p className="text-slate-400 text-sm">Configure your gateway, providers, and security.</p>
+    <div className="max-w-7xl mx-auto h-full flex flex-col py-6 lg:py-8 px-6 lg:px-10 space-y-6 overflow-hidden">
+      <header className="shrink-0 space-y-2 pb-2 border-b border-slate-800/50">
+        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text text-neon-gradient tracking-tighter">System Settings</h1>
+        <p className="text-slate-400 text-sm font-medium">Configure your gateway, providers, and security.</p>
       </header>
 
-      <form onSubmit={handleSave} className="flex-1 min-h-150 flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden pb-4">
-        <div className="lg:col-span-8 flex flex-col min-h-0 overflow-hidden">
-          <Card className="flex-1 flex flex-col min-h-0 p-4 lg:p-5">
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <h2 className="text-base font-bold text-white flex items-center gap-3">
-                <Globe className="text-indigo-500" size={18} />
+      <form onSubmit={handleSave} className="flex-1 min-h-[550px] flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden pb-4 pt-2">
+        <div className="lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
+          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 shadow-panel">
+            <div className="flex items-center justify-between mb-5 shrink-0">
+              <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
+                <Globe className="text-indigo-400 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]" size={20} />
                 Providers
               </h2>
             </div>
@@ -663,26 +742,28 @@ const Settings = ({ user: initialUser }) => {
                 className="absolute inset-0 overflow-y-auto overscroll-contain scroll-smooth space-y-3 pr-1 pb-8 custom-scrollbar"
               >
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Popular Providers</h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="label-caps">Popular Providers</h3>
                   </div>
-                  <div className="space-y-3">
-                    <CopilotAuthCard
-                      onConnected={ensureCopilotProvider}
-                    />
-                    {otherPopularProviders.length > 0 && renderProviderList(otherPopularProviders)}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2">
+                      <CopilotAuthCard
+                        onConnected={ensureCopilotProvider}
+                      />
+                    </div>
+                    {otherPopularProviders.length > 0 && renderProviderGrid(otherPopularProviders)}
                   </div>
                 </div>
 
-                <div className="space-y-2 pt-2">
+                <div className="space-y-3 pt-3 border-t border-slate-800/50 mt-3">
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Custom Provider</h3>
-                    <button type="button" onClick={() => setIsAddModalOpen(true)} className="px-3 py-1.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-lg hover:bg-indigo-500/20 transition-colors uppercase tracking-widest cursor-pointer">
+                    <h3 className="label-caps">Custom Provider</h3>
+                    <button type="button" onClick={() => setIsAddModalOpen(true)} className="px-4 py-1.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-full hover:bg-indigo-500/20 hover:shadow-glow transition-all uppercase tracking-widest cursor-pointer border border-indigo-500/20">
                       <Plus size={12} className="inline mr-1" /> Add
                     </button>
                   </div>
-                  <div className="space-y-3">
-                    {renderProviderList(customProviders, 'No custom provider configured')}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {renderProviderGrid(customProviders, 'No custom provider configured')}
                   </div>
                 </div>
               </div>
@@ -692,24 +773,224 @@ const Settings = ({ user: initialUser }) => {
           </Card>
         </div>
 
-        <div className="lg:col-span-4">
-          <AccessKeyDisplay accessKey={user?.accessKey} />
+        <div className="lg:col-span-6 flex flex-col space-y-6 overflow-hidden">
+          <Card className="flex-1 flex flex-col min-h-0 space-y-0 p-5 lg:p-6 shadow-panel gap-4">
+            <div className="flex items-center justify-between gap-3 shrink-0">
+              <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
+                <Route className="text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" size={20} />
+                Model Routes
+              </h2>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-500 bg-cyan-500/10 px-2.5 py-1 rounded-full border border-cyan-500/20 shadow-[0_0_10px_-2px_rgba(34,211,238,0.2)]">
+                  {Object.keys(getModelRouting()).length} Active
+                </span>
+                <button type="button" onClick={() => setIsAddRouteModalOpen(true)} className="px-4 py-1.5 bg-cyan-500/10 text-cyan-400 text-[10px] font-bold rounded-full hover:bg-cyan-500/20 hover:shadow-[0_0_15px_-3px_rgba(34,211,238,0.3)] transition-all uppercase tracking-widest cursor-pointer border border-cyan-500/20">
+                  <Plus size={12} className="inline mr-1" /> Add
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 overflow-hidden flex-1 min-h-0 flex flex-col pt-4 border-t border-slate-800/50 mt-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 overflow-y-auto pr-1 custom-scrollbar flex-1 min-h-[100px] content-start">
+                    {Object.entries(getModelRouting()).length === 0 ? (
+                      <div className="col-span-full rounded-xl border border-dashed border-slate-800/50 bg-slate-950/40 px-4 py-8 text-center text-slate-600">
+                        <p className="text-xs font-medium">No routing rules configured</p>
+                      </div>
+                    ) : (
+                      Object.entries(getModelRouting()).map(([model, providerTarget]) => {
+                        const routedProvider = getProviderForRouteTarget(providerTarget);
+                        const selectValue = routedProvider?.id || providerTarget;
+
+                        return (
+                          <div key={model} className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-cyan-500/50 hover:shadow-[0_0_20px_-5px_rgba(34,211,238,0.25)] group relative overflow-hidden flex flex-col gap-3">
+                            <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none"></div>
+                            <input
+                              defaultValue={model}
+                              onBlur={(e) => {
+                                const nextModel = updateModelRouteKey(model, e.target.value);
+                                e.target.value = nextModel;
+                              }}
+                              className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] font-mono text-cyan-100 focus:border-cyan-500/50 focus:outline-none relative z-10"
+                              placeholder="model or prefix"
+                            />
+                            <div className="flex gap-2 relative z-10">
+                              <div className="min-w-0 flex-1 bg-slate-950/40 border border-slate-800/50 rounded-lg px-3 py-2 text-[11px] text-slate-400 font-mono flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></span>
+                                {routedProvider?.name || providerTarget}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeModelRoute(model)}
+                                className="shrink-0 p-2 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 cursor-pointer transition-colors"
+                                title="Remove route"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  </div>
+          </Card>
         </div>
       </form>
 
       <AnimatePresence>
         {isAddModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-2xl">
-              <h2 className="text-lg font-bold text-white">Add New Provider</h2>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-sm glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel">
+              <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Add New Provider</h2>
               <div className="space-y-4">
-                <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} />
-                <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} />
-                <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} />
+                <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} placeholder="e.g. Local LLaMA" />
+                <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} placeholder="https://..." />
+                <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} placeholder="sk-..." />
               </div>
-              <div className="flex gap-3">
-                <button onClick={() => setIsAddModalOpen(false)} className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition-colors">Cancel</button>
-                <button onClick={handleAddProvider} className="flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-500 text-white hover:bg-indigo-600 shadow-lg shadow-indigo-500/20 transition-all active:scale-95">Add Provider</button>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 py-2.5 rounded-xl text-xs font-bold label-caps text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer">Cancel</button>
+                <button type="button" onClick={handleAddProvider} className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:from-indigo-400 hover:to-cyan-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Add Provider</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editingProviderId && (() => {
+          const p = form.providers.find(x => x.id === editingProviderId);
+          if (!p) return null;
+          return (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-lg glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between shrink-0">
+                <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Edit Provider</h2>
+                <button type="button" onClick={() => setEditingProviderId(null)} className="text-slate-400 hover:text-white cursor-pointer"><XCircle size={20}/></button>
+              </div>
+              
+              <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2">
+                      <Input label="Name" value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Input label="Base URL" value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" />
+                    </div>
+                    <div className="sm:col-span-2 space-y-3">
+                      <label className="label-caps">API Keys</label>
+                      <div className="space-y-2">
+                        {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).map((key, idx) => (
+                          <div key={idx} className="flex gap-2">
+                            <div className="flex-1 relative">
+                              <input type="password" value={key} readOnly className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-400 focus:outline-none font-mono" />
+                              <div className="absolute right-3 top-2.5 text-[10px] text-slate-500 font-mono">{key.slice(0, 4)}...{key.slice(-4)}</div>
+                            </div>
+                            <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer" title="Remove Key">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <input type="password" placeholder="Add new API key..." className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all font-mono"
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
+                              onBlur={(e) => { if (e.target.value) { addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
+                            />
+                          </div>
+                          <div className="w-10 h-10 flex items-center justify-center text-indigo-500 bg-indigo-500/10 rounded-xl border border-indigo-500/20"><Plus size={16} /></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+              </div>
+              <div className="shrink-0 pt-4 border-t border-slate-800/50">
+                <button type="button" onClick={() => setEditingProviderId(null)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:from-indigo-400 hover:to-cyan-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Done</button>
+              </div>
+            </motion.div>
+          </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isAddRouteModalOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-sm glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel overflow-visible">
+              <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Add Model Route</h2>
+              <div className="space-y-4 overflow-visible">
+                <div className="relative" ref={modelDropdownRef}>
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Select Model</label>
+                  <input
+                    type="text"
+                    value={isModelDropdownOpen ? modelSearchQuery : (newRouteForm.model || '')}
+                    onChange={(e) => {
+                      setModelSearchQuery(e.target.value);
+                      if (!isModelDropdownOpen) setIsModelDropdownOpen(true);
+                    }}
+                    onFocus={() => {
+                      setIsModelDropdownOpen(true);
+                      setModelSearchQuery('');
+                    }}
+                    placeholder={newRouteForm.model || "Select or search a model..."}
+                    className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono placeholder:text-slate-500"
+                  />
+                  <div className="absolute right-3 top-[34px] pointer-events-none text-slate-500">
+                    <ChevronDown size={14} />
+                  </div>
+                  <AnimatePresence>
+                    {isModelDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="absolute z-50 w-full mt-1 bg-slate-900/95 backdrop-blur-md border border-cyan-500/30 rounded-lg shadow-glow max-h-48 overflow-y-auto custom-scrollbar p-1"
+                      >
+                        {availableModels
+                          .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                          .map((m) => (
+                            <div
+                              key={m.id}
+                              onClick={() => {
+                                setNewRouteForm(prev => ({ ...prev, model: m.id }));
+                                setIsModelDropdownOpen(false);
+                                setModelSearchQuery('');
+                              }}
+                              className="px-3 py-2 text-[11px] font-mono text-slate-300 hover:text-white hover:bg-cyan-500/20 rounded cursor-pointer transition-colors"
+                            >
+                              {m.name || m.id} <span className="text-slate-500 text-[10px]">({m.id})</span>
+                            </div>
+                        ))}
+                        {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
+                          <div className="px-3 py-2 text-[11px] font-mono text-slate-500 text-center">No models found</div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Target Provider</label>
+                  <select
+                    value={newRouteForm.providerId || routeProviders[0]?.id || ''}
+                    onChange={(e) => setNewRouteForm(prev => ({ ...prev, providerId: e.target.value }))}
+                    className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-200 focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono"
+                    disabled={routeProviders.length === 0}
+                  >
+                    {routeProviders.length === 0 ? (
+                      <option value="">No selected providers</option>
+                    ) : (
+                      routeProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name || provider.id}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setIsAddRouteModalOpen(false)} className="flex-1 py-2.5 rounded-xl text-xs font-bold label-caps text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer">Cancel</button>
+                <button type="button" onClick={() => { addModelRoute(); setIsAddRouteModalOpen(false); }} disabled={routeProviders.length === 0} className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-500 to-indigo-500 text-white hover:from-cyan-400 hover:to-indigo-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed">Add Route</button>
               </div>
             </motion.div>
           </motion.div>

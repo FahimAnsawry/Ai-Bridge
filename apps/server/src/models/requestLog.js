@@ -11,6 +11,7 @@ const requestLogSchema = new mongoose.Schema({
   latencyMs: Number,
   promptTokens: Number,
   completionTokens: Number,
+  totalTokens: Number,
   streaming: Boolean,
   provider: String,
   optimization: {

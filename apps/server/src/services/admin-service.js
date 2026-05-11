@@ -1,6 +1,7 @@
 const { loadConfig, saveConfig, loadGlobalConfig } = require('../config/config');
 const { getLogs, getLatestLog, clearLogs, getStats } = require('../middlewares/logger');
 const { mongoose, User, ModelCatalog, RequestLog, Provider } = require('../config/db');
+const { isNvidiaNimProvider } = require('../utils/provider-detection');
 
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
@@ -18,6 +19,20 @@ function formatUptime(ms) {
 }
 
 function createAdminService(runtime) {
+  function getActiveProvider(config) {
+    const providers = Array.isArray(config.providers) ? config.providers : [];
+    return providers.find((provider) => provider.id === config.active_provider_id) || null;
+  }
+
+  function uniqueModels(models = []) {
+    const seen = new Set();
+    return models.filter((model) => {
+      if (!model?.id || seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    });
+  }
+
   async function getStatus(userId) {
     const runtimeState = await runtime.getState();
     const stats = await getStats(userId);
@@ -139,14 +154,22 @@ function createAdminService(runtime) {
 
   async function listModels(userId) {
     const config = await loadConfig(userId);
-    const modelList = Array.isArray(config.model_catalogs) 
-      ? config.model_catalogs.reduce((acc, cat) => acc.concat(cat.models || []), [])
-      : [];
+    const catalogs = Array.isArray(config.model_catalogs) ? config.model_catalogs : [];
+    const activeProvider = getActiveProvider(config);
+    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProvider);
+    const activeCatalog = activeProvider
+      ? catalogs.find((cat) => cat.providerId === activeProvider.id)
+      : null;
+    const modelList = activeProviderIsNvidiaNim
+      ? (activeCatalog?.models || [])
+      : catalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
     const now = Math.floor(Date.now() / 1000);
 
     return {
       object: 'list',
-      data: modelList.map((model) => ({
+      sourceProviderId: activeProviderIsNvidiaNim ? activeProvider?.id : null,
+      activeProviderIsNvidiaNim,
+      data: uniqueModels(modelList).map((model) => ({
         id: model.id,
         object: 'model',
         created: now,
@@ -158,9 +181,24 @@ function createAdminService(runtime) {
   async function getModelOfferings(userId) {
     const config = await loadConfig(userId);
     const catalogs = config.model_catalogs || [];
-    
-    // For simplicity, just return the first one or merge them.
-    // The SwiftRouter catalog is the primary one here.
+    const activeProvider = getActiveProvider(config);
+    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProvider);
+    const activeCatalog = activeProvider
+      ? catalogs.find(c => c.providerId === activeProvider.id)
+      : null;
+
+    if (activeProviderIsNvidiaNim) {
+      return activeCatalog || {
+        sourceProviderId: activeProvider?.id || 'nvidia-nim',
+        lastSyncedAt: null,
+        totalModels: 0,
+        totalProviders: 0,
+        providers: [],
+        categories: { chat: 0, vision: 0, code: 0, other: 0 },
+        warnings: ['No NVIDIA NIM model catalog yet. Run sync to populate models from the active NIM provider.'],
+      };
+    }
+
     const swiftCatalog = catalogs.find(c => c.providerId === 'swiftrouter');
 
     if (!swiftCatalog) {
@@ -178,21 +216,8 @@ function createAdminService(runtime) {
     return swiftCatalog;
   }
 
-  async function syncModels(userId) {
-    // Actually runtime.syncModels has no user context if we pass it here without changing runtime signature,
-    // wait, we DID change runtime signature to take userId on creation or we can change syncModels.
-    // In proxy-runtime.js we changed `createProxyRuntime` to accept `options.userId`. 
-    // But there's only ONE proxy runtime created in index.js currently.
-    // Actually, Phase 5: "createProxyRuntime() now takes userId parameter".
-    // Let's pass userId to syncModels directly if we didn't before. We changed it to `async function syncModels(options = {})`.
-    // Wait, I changed proxy-runtime.js `syncModels` to use `userId` from its closure! That means one runtime per user?
-    // Let's check `index.js`.
-    // The plan says: "Modify server/proxy-runtime.js: createProxyRuntime() now takes userId parameter"
-    // Wait! A single proxy-runtime for all users would mean passing userId to methods! 
-    // If I changed `createProxyRuntime` to take `userId`, then how does index.js start it for all users? 
-    // Oh, the AI proxy logic might be per-user or the dashboard uses one global runtime that delegates?
-    // Let's just pass userId down.
-    return await runtime.syncModels({ persist: true, userId });
+  async function syncModels(userId, options = {}) {
+    return await runtime.syncModels({ persist: true, userId, providerId: options.providerId });
   }
 
   // --- Admin Methods ---

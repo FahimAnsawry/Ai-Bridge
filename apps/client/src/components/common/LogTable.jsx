@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getTokenUsage } from '../../utils/tokenUsage';
 
 const BASE_BADGE = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-black uppercase tracking-widest border';
 
@@ -63,7 +64,7 @@ const LogTable = ({ logs = [], loading = false }) => {
           <AnimatePresence initial={false}>
             {logs.map((log) => {
               const isOk = log.status < 400;
-              const tokens = (log.promptTokens || 0) + (log.completionTokens || 0);
+              const usage = getTokenUsage(log);
 
               return (
                 <motion.tr
@@ -135,8 +136,8 @@ const LogTable = ({ logs = [], loading = false }) => {
                   </td>
 
                   <td className="px-4 py-3.5 text-xs font-bold text-[--color-text-secondary]">
-                    {tokens > 0 ? (
-                      <span style={{ color: '#818cf8' }}>{tokens.toLocaleString()}</span>
+                    {usage.hasUsage && usage.totalTokens > 0 ? (
+                      <span style={{ color: '#818cf8' }}>{usage.totalTokens.toLocaleString()}</span>
                     ) : '—'}
                   </td>
 

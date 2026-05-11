@@ -19,6 +19,7 @@ import UsageTrendChart from '../components/dashboard/UsageTrendChart';
 import ModelDistribution from '../components/dashboard/ModelDistribution';
 import ProviderHealthPanel from '../components/dashboard/ProviderHealthPanel';
 import { SkeletonKpi, SkeletonChart, EmptyState, ErrorState } from '../components/dashboard/StateBanner';
+import AccessKeyDisplay from '../components/common/AccessKeyDisplay';
 
 const GRADIENTS = {
   blue:    'linear-gradient(135deg, #6366f1 0%, #818cf8 100%)',
@@ -199,6 +200,10 @@ const Overview = ({ user }) => {
           onCopy={handleCopy}
           copied={copiedEndpoint}
         />
+      </div>
+
+      <div className="shrink-0">
+        <AccessKeyDisplay accessKey={user?.accessKey} />
       </div>
 
       {/* ── SUMMARY STRIP ────────────────────────────────────────────────── */}

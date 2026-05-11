@@ -8,7 +8,7 @@ function isDbConnected() {
   return mongoose.connection.readyState === 1;
 }
 
-const CONFIG_CACHE_TTL_MS = 5_000;
+const CONFIG_CACHE_TTL_MS = 30_000;
 const configCache = new Map();
 
 function getConfigCacheKey(userId, includeCatalogs) {
@@ -30,29 +30,7 @@ function clearConfigCache(userId) {
 const DEFAULTS = {
   port: 3000,
   cors_origins: ['*'],
-  model_routing: 'fallback',
-  model_mapping: {
-    'kimi-k2.5': 'kimi-k2.5',
-    'kimi-k2': 'kimi-k2.5',
-    'kimi': 'kimi-k2.5',
-    'moonshotai/kimi-k2.6': 'kimi-k2.6',
-    'deepseek-ai/deepseek-v4-pro': 'deepseek-v4-pro',
-    'qwen/qwen3.5-397b-a17b': 'qwen3.6-plus',
-    'minimaxai/minimax-m2.7': 'minimax-m2.7',
-    'z-ai/glm-5.1': 'glm-5.1',
-    'claude-opus-4-6': 'claude-opus-4-6',
-    'claude-sonnet-4-6': 'claude-sonnet-4-6',
-    'claude-sonnet-4.6': 'claude-sonnet-4-6',
-    'claude-opus-4.6': 'claude-opus-4-6',
-    'glm-5.1': 'glm-5.1',
-    'kimi-k2.6': 'kimi-k2.6',
-    'minimax-m2.7': 'minimax-m2.7',
-    'qwen-3.6-plus': 'qwen-3.6-plus',
-    'gemini-3-flash-preview': 'gemini-3-flash-preview',
-    'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
-    'deepseek-v3.2': 'deepseek-v3.2',
-    'deepseek-r1-0528': 'deepseek-r1-0528',
-  },
+  model_routing: {},
   stub_models: [],
   request_minimization_enabled: true,
   chat_max_upstream_attempts: 4,
@@ -62,6 +40,7 @@ const DEFAULTS = {
   response_cache_enabled: false,
   response_cache_ttl_seconds: 30,
   active_provider_id: 'swiftrouter',
+  active_model_id: '',
   providers: [
     {
       id: 'swiftrouter',
@@ -74,6 +53,13 @@ const DEFAULTS = {
       id: 'ecomagent',
       name: 'EcomAgent',
       baseUrl: 'https://api.ecomagent.in/v1',
+      apiKey: '',
+      isActive: true
+    },
+    {
+      id: 'freemodel',
+      name: 'FreeModel',
+      baseUrl: 'https://api.freemodel.dev',
       apiKey: '',
       isActive: true
     },
@@ -94,39 +80,22 @@ const DEFAULTS = {
   ]
 };
 
-const PROTECTED_IDENTITY_MAPPINGS = {
-  'gemini-3-flash-preview': 'gemini-3-flash-preview',
-};
-
-function isRemovedClaudeHaikuModel(value) {
-  if (!value || typeof value !== 'string') return false;
-  return /^claude(?:\s+|-)haiku(?:\s+|-)4[.-]5(?:-[\w.-]+)?$/i.test(value);
-}
-
-function normalizeModelMapping(modelMapping) {
-  const normalized = {};
-
-  for (const [modelId, mappedModel] of Object.entries(modelMapping || {})) {
-    if (isRemovedClaudeHaikuModel(modelId) || isRemovedClaudeHaikuModel(mappedModel)) {
-      continue;
-    }
-    normalized[modelId] = mappedModel;
-  }
-
-  Object.assign(normalized, PROTECTED_IDENTITY_MAPPINGS);
-
-  return normalized;
-}
 
 function normalizeActiveProviderId(providers, activeProviderId) {
   const list = Array.isArray(providers) ? providers : [];
   if (list.length === 0) return null;
   const selected = list.filter((p) => p?.isActive !== false);
-  if (selected.length === 0) return null;
+  // Prefer matching the requested ID among active providers
   if (activeProviderId && selected.some((p) => p.id === activeProviderId)) {
     return activeProviderId;
   }
-  return selected[0].id || null;
+  // If the ID exists in the full list (even if inactive), preserve it as active provider
+  if (activeProviderId && list.some((p) => p.id === activeProviderId)) {
+    return activeProviderId;
+  }
+  // Return first active provider, or first provider if none are marked active
+  if (selected.length > 0) return selected[0].id || null;
+  return list[0].id || null;
 }
 
 function getActiveProviderIds(providers) {
@@ -134,6 +103,17 @@ function getActiveProviderIds(providers) {
     .filter((p) => p?.isActive !== false)
     .map((p) => p.id)
     .filter(Boolean);
+}
+
+function normalizeModelRouting(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  return Object.entries(value).reduce((acc, [model, providerId]) => {
+    const key = String(model || '').trim();
+    const target = String(providerId || '').trim();
+    if (key && target) acc[key] = target;
+    return acc;
+  }, {});
 }
 
 /**
@@ -170,7 +150,6 @@ async function loadConfig(userId, options = {}) {
       port: DEFAULTS.port,
       cors_origins: DEFAULTS.cors_origins,
       model_routing: DEFAULTS.model_routing,
-      model_mapping: { ...DEFAULTS.model_mapping },
       stub_models: DEFAULTS.stub_models,
       request_minimization_enabled: DEFAULTS.request_minimization_enabled,
       chat_max_upstream_attempts: DEFAULTS.chat_max_upstream_attempts,
@@ -180,6 +159,7 @@ async function loadConfig(userId, options = {}) {
       response_cache_enabled: DEFAULTS.response_cache_enabled,
       response_cache_ttl_seconds: DEFAULTS.response_cache_ttl_seconds,
       active_provider_id: normalizeActiveProviderId(DEFAULTS.providers, DEFAULTS.active_provider_id),
+      active_model_id: DEFAULTS.active_model_id,
       active_provider_ids: getActiveProviderIds(DEFAULTS.providers),
       providers: DEFAULTS.providers,
       model_catalogs: [],
@@ -208,11 +188,6 @@ async function loadConfig(userId, options = {}) {
   // Determine which config to use (prefer UserConfig if it exists)
   const cfg = userConfig || user.config || {};
 
-  const modelMapping = cfg.modelMapping
-    ? (cfg.modelMapping instanceof Map ? Object.fromEntries(cfg.modelMapping) : cfg.modelMapping)
-    : { ...DEFAULTS.model_mapping };
-  const normalizedModelMapping = normalizeModelMapping(modelMapping);
-
   const providers = providerDocs.length > 0
     ? providerDocs.map(p => ({
       id: p.providerId,
@@ -232,13 +207,16 @@ async function loadConfig(userId, options = {}) {
     }));
 
   const activeProviderId = normalizeActiveProviderId(providers, cfg.activeProviderId || user.activeProviderId || null);
+  const modelRouting = normalizeModelRouting(
+    cfg.modelRouting !== undefined ? cfg.modelRouting : user.config?.modelRouting
+  );
   const config = {
     port: cfg.port || user.config?.port || DEFAULTS.port,
     cors_origins: cfg.corsOrigins?.length ? cfg.corsOrigins : (user.config?.corsOrigins?.length ? user.config.corsOrigins : DEFAULTS.cors_origins),
-    model_routing: cfg.modelRouting || user.config?.modelRouting || DEFAULTS.model_routing,
+    model_routing: modelRouting,
     active_provider_id: activeProviderId,
+    active_model_id: cfg.activeModelId ?? user.config?.activeModelId ?? DEFAULTS.active_model_id,
     active_provider_ids: getActiveProviderIds(providers),
-    model_mapping: normalizedModelMapping,
     stub_models: cfg.stubModels || user.config?.stubModels || [],
     request_minimization_enabled: cfg.requestMinimizationEnabled ?? user.config?.requestMinimizationEnabled ?? DEFAULTS.request_minimization_enabled,
     chat_max_upstream_attempts: cfg.chatMaxUpstreamAttempts ?? user.config?.chatMaxUpstreamAttempts ?? DEFAULTS.chat_max_upstream_attempts,
@@ -274,7 +252,13 @@ async function saveConfig(userId, updates) {
 
   if (!isDbConnected()) {
     const base = await loadConfig('default');
-    return { ...base, ...updates };
+    return {
+      ...base,
+      ...updates,
+      model_routing: updates.model_routing !== undefined
+        ? normalizeModelRouting(updates.model_routing)
+        : base.model_routing,
+    };
   }
 
   const uId = new mongoose.Types.ObjectId(userId.toString());
@@ -379,11 +363,9 @@ async function saveConfig(userId, updates) {
   };
   if (updates.port !== undefined) configUpdates.port = updates.port;
   if (updates.cors_origins !== undefined) configUpdates.corsOrigins = updates.cors_origins;
-  if (updates.model_routing !== undefined) configUpdates.modelRouting = updates.model_routing;
+  if (updates.model_routing !== undefined) configUpdates.modelRouting = normalizeModelRouting(updates.model_routing);
   if (updates.active_provider_id !== undefined) configUpdates.activeProviderId = updates.active_provider_id;
-  if (updates.model_mapping !== undefined) {
-    configUpdates.modelMapping = new Map(Object.entries(normalizeModelMapping(updates.model_mapping)));
-  }
+  if (updates.active_model_id !== undefined) configUpdates.activeModelId = String(updates.active_model_id || '').trim();
   if (updates.stub_models !== undefined) configUpdates.stubModels = updates.stub_models;
   if (updates.request_minimization_enabled !== undefined) {
     configUpdates.requestMinimizationEnabled = updates.request_minimization_enabled;

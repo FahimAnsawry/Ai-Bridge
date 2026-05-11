@@ -7,7 +7,7 @@
  */
 
 const axios = require('axios');
-const { loadConfig, saveConfig } = require('../config/config');
+const { loadConfig, clearConfigCache } = require('../config/config');
 
 function normalizeBaseUrl(url = '') {
   return String(url).replace(/\/+$/, '');
@@ -120,7 +120,7 @@ function mergeCustomModels(syncedModels, existingModels) {
   return merged;
 }
 
-function buildOfferings(rawModels, normalizedModels, warnings = []) {
+function buildOfferings(rawModels, normalizedModels, warnings = [], sourceProviderId = 'swiftrouter') {
   const providers = new Set();
   const categories = { chat: 0, vision: 0, code: 0, other: 0 };
 
@@ -144,7 +144,7 @@ function buildOfferings(rawModels, normalizedModels, warnings = []) {
   }
 
   return {
-    sourceProviderId: 'swiftrouter',
+    sourceProviderId,
     lastSyncedAt: new Date().toISOString(),
     totalModels: normalizedModels.length,
     totalProviders: providers.size,
@@ -154,30 +154,39 @@ function buildOfferings(rawModels, normalizedModels, warnings = []) {
   };
 }
 
-async function syncSwiftRouterModels(userId, options = {}) {
+async function syncProviderModels(userId, options = {}) {
   const persist = options.persist !== false;
-  if (!userId) throw new Error('syncSwiftRouterModels requires a userId');
+  if (!userId) throw new Error('syncProviderModels requires a userId');
 
   const config = await loadConfig(userId);
   const providers = Array.isArray(config.providers) ? config.providers : [];
-  const swiftProvider = providers.find((p) => p.id === 'swiftrouter');
-  const existingCustomModels = Array.isArray(config.custom_models) ? config.custom_models : [];
+  const targetProviderId = options.providerId || 'swiftrouter';
+  const targetProvider = providers.find((p) => p.id === targetProviderId);
+  const existingCatalog = (config.model_catalogs || []).find((cat) => cat.providerId === targetProviderId);
+  const existingCustomModels = Array.isArray(existingCatalog?.models)
+    ? existingCatalog.models
+    : (Array.isArray(config.custom_models) ? config.custom_models : []);
 
-  if (!swiftProvider) {
-    const err = new Error('Provider "swiftrouter" is not configured in providers[].');
+  if (!targetProvider) {
+    const err = new Error(`Provider "${targetProviderId}" is not configured in providers[].`);
     err.code = 'missing_provider';
     throw err;
   }
 
-  if (!swiftProvider.apiKey) {
-    const err = new Error('SwiftRouter API key is missing. Add it in Settings before syncing models.');
+  const apiKey = (Array.isArray(targetProvider.apiKeys)
+    ? targetProvider.apiKeys.find((key) => key && key.trim())
+    : targetProvider.apiKey
+  )?.trim();
+
+  if (!apiKey) {
+    const err = new Error(`${targetProvider.name || targetProvider.id} API key is missing. Add it in Settings before syncing models.`);
     err.code = 'missing_api_key';
     throw err;
   }
 
-  const baseUrl = normalizeBaseUrl(swiftProvider.baseUrl);
+  const baseUrl = normalizeBaseUrl(targetProvider.baseUrl);
   if (!baseUrl) {
-    const err = new Error('SwiftRouter baseUrl is empty.');
+    const err = new Error(`${targetProvider.name || targetProvider.id} baseUrl is empty.`);
     err.code = 'missing_base_url';
     throw err;
   }
@@ -185,7 +194,7 @@ async function syncSwiftRouterModels(userId, options = {}) {
   const modelsUrl = `${baseUrl}/models`;
   const response = await axios.get(modelsUrl, {
     headers: {
-      Authorization: `Bearer ${swiftProvider.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
     },
     timeout: 25000,
@@ -194,7 +203,7 @@ async function syncSwiftRouterModels(userId, options = {}) {
 
   if (response.status >= 400) {
     const details = typeof response.data === 'string' ? response.data : JSON.stringify(response.data || {});
-    const err = new Error(`SwiftRouter /models failed with HTTP ${response.status}. ${details}`);
+    const err = new Error(`${targetProvider.name || targetProvider.id} /models failed with HTTP ${response.status}. ${details}`);
     err.code = 'upstream_error';
     err.status = response.status;
     throw err;
@@ -202,7 +211,7 @@ async function syncSwiftRouterModels(userId, options = {}) {
 
   const rawModels = extractModelArray(response.data);
   if (!rawModels.length) {
-    const err = new Error('SwiftRouter returned no models from /models.');
+    const err = new Error(`${targetProvider.name || targetProvider.id} returned no models from /models.`);
     err.code = 'empty_models';
     throw err;
   }
@@ -210,23 +219,19 @@ async function syncSwiftRouterModels(userId, options = {}) {
   const warnings = [];
   const normalizedModels = normalizeModels(rawModels);
   if (!normalizedModels.length) {
-    const err = new Error('Unable to normalize SwiftRouter model list.');
+    const err = new Error(`Unable to normalize ${targetProvider.name || targetProvider.id} model list.`);
     err.code = 'normalize_failed';
     throw err;
   }
 
-  const modelCatalog = buildOfferings(rawModels, normalizedModels, warnings);
+  const modelCatalog = buildOfferings(rawModels, normalizedModels, warnings, targetProvider.id);
   const mergedCustomModels = mergeCustomModels(normalizedModels, existingCustomModels);
 
   if (persist) {
-    // Actually, Phase 5 plan says: "sync into user's model_catalogs collection instead of global config"
-    // And "updates user's user_configs.modelMapping with normalized model names".
-    // For now, let's just save the custom_models via saveConfig, but the schema doesn't have custom_models in Phase 1.
-    // Let's use the ModelCatalog model directly.
-    const { ModelCatalog, UserConfig } = require('../config/db');
+    const { ModelCatalog } = require('../config/db');
 
     await ModelCatalog.findOneAndUpdate(
-      { userId, providerId: swiftProvider.id },
+      { userId, providerId: targetProvider.id },
       {
         models: mergedCustomModels,
         categories: modelCatalog.categories,
@@ -235,43 +240,28 @@ async function syncSwiftRouterModels(userId, options = {}) {
       },
       { upsert: true, returnDocument: 'after' }
     );
+    clearConfigCache(userId);
 
-    // Update modelMapping in user config with identity mappings for new models
-    const userConfig = await UserConfig.findOne({ userId });
-    if (userConfig) {
-      const currentMapping = userConfig.modelMapping;
-      const mappingAsObject = currentMapping instanceof Map
-        ? Object.fromEntries(currentMapping)
-        : (currentMapping && typeof currentMapping === 'object' ? { ...currentMapping } : {});
-
-      let mappingUpdated = false;
-      for (const m of normalizedModels) {
-        if (!mappingAsObject[m.id]) {
-          mappingAsObject[m.id] = m.id;
-          mappingUpdated = true;
-        }
-      }
-
-      if (mappingUpdated) {
-        userConfig.modelMapping = mappingAsObject;
-        await userConfig.save();
-      }
-    }
   }
 
   return {
     success: true,
     provider: {
-      id: swiftProvider.id,
-      name: swiftProvider.name,
-      baseUrl: swiftProvider.baseUrl,
+      id: targetProvider.id,
+      name: targetProvider.name,
+      baseUrl: targetProvider.baseUrl,
     },
     syncedModels: normalizedModels.length,
     modelCatalog,
   };
 }
 
+async function syncSwiftRouterModels(userId, options = {}) {
+  return syncProviderModels(userId, { ...options, providerId: options.providerId || 'swiftrouter' });
+}
+
 module.exports = {
   syncSwiftRouterModels,
+  syncProviderModels,
   buildOfferings,
 };

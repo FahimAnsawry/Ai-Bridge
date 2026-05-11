@@ -1,21 +1,39 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { io } from 'socket.io-client';
 import LogTable from '../components/common/LogTable';
 import LiveConsole from '../components/common/LiveConsole';
 import ConfirmationModal from '../components/common/ConfirmationModal';
-import { Download, Trash2, Search, Wifi, WifiOff, Table, Terminal as TerminalIcon } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Download,
+  Trash2,
+  Search,
+  Wifi,
+  WifiOff,
+  Table,
+  Terminal as TerminalIcon,
+} from 'lucide-react';
 import { fetchLogs, clearLogs as apiClearLogs } from '../api';
+import { getTokenTotal } from '../utils/tokenUsage';
 
 const PANEL_STYLE = {
   background: 'var(--color-bg-panel)',
   border: '1px solid var(--color-glass-border)',
 };
 
+const PAGE_SIZES = [25, 50, 100, 200];
+
 const Logs = ({ user }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [connected, setConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [viewMode, setViewMode] = useState('table');
@@ -65,7 +83,7 @@ const Logs = ({ user }) => {
     const headers = 'Time,Method,Path,Model,Provider,Status,LatencyMs,Tokens,Streaming\n';
     const rows = logs.map((log) => [
       log.timestamp, log.method, log.path, log.model, log.provider || '',
-      log.status, log.latencyMs, (log.promptTokens || 0) + (log.completionTokens || 0), log.streaming,
+      log.status, log.latencyMs, getTokenTotal(log), log.streaming,
     ].join(','));
     const blob = new Blob([headers + rows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -74,13 +92,34 @@ const Logs = ({ user }) => {
     a.click(); URL.revokeObjectURL(url);
   };
 
-  const filtered = search
-    ? logs.filter((log) => {
+  const filtered = useMemo(() => (
+    search
+      ? logs.filter((log) => {
         const q = search.toLowerCase();
         return log.path?.toLowerCase().includes(q) || log.model?.toLowerCase().includes(q) ||
                String(log.status).includes(q) || log.method?.toLowerCase().includes(q);
       })
-    : logs;
+      : logs
+  ), [logs, search]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const pageStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const pageEnd = Math.min(safePage * pageSize, filtered.length);
+  const paginatedLogs = useMemo(() => (
+    filtered.slice((safePage - 1) * pageSize, safePage * pageSize)
+  ), [filtered, pageSize, safePage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, pageSize]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  const goToPage = (nextPage) => {
+    setPage(Math.min(Math.max(1, nextPage), pageCount));
+  };
 
   const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.45, ease: [0.23, 1, 0.32, 1] } }) };
 
@@ -200,6 +239,25 @@ const Logs = ({ user }) => {
           >
             {filtered.length} entries
           </div>
+
+          <label className="relative ml-auto">
+            <span className="sr-only">Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="min-h-[2.5rem] appearance-none rounded-xl pl-4 pr-10 text-xs font-black uppercase tracking-widest outline-none transition-all"
+              style={{
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border-strong)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>{size} / page</option>
+              ))}
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[--color-text-tertiary]" />
+          </label>
         </div>
       </motion.section>
 
@@ -211,11 +269,69 @@ const Logs = ({ user }) => {
       >
         <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-[--radius-lg]" style={{ background: 'var(--gradient-neon)', opacity: 0.35 }} />
         {viewMode === 'table' ? (
-            <LogTable logs={filtered} loading={loading} />
+            <LogTable logs={paginatedLogs} loading={loading} />
         ) : (
-            <LiveConsole logs={filtered} autoScroll={autoScroll} />
+            <LiveConsole logs={paginatedLogs} autoScroll={autoScroll} />
         )}
       </motion.section>
+
+      {!loading && filtered.length > 0 && (
+        <motion.nav
+          custom={3} variants={fadeUp} initial="hidden" animate="visible"
+          className="flex flex-col gap-3 rounded-[--radius-lg] p-4 sm:flex-row sm:items-center sm:justify-between"
+          style={PANEL_STYLE}
+          aria-label="Logs pagination"
+        >
+          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[--color-text-tertiary]">
+            Showing <span className="text-[--color-text-secondary]">{pageStart.toLocaleString()}</span>
+            {' '}to <span className="text-[--color-text-secondary]">{pageEnd.toLocaleString()}</span>
+            {' '}of <span className="text-[--color-text-secondary]">{filtered.length.toLocaleString()}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {[
+              { label: 'First page', icon: ChevronsLeft, disabled: safePage === 1, onClick: () => goToPage(1) },
+              { label: 'Previous page', icon: ChevronLeft, disabled: safePage === 1, onClick: () => goToPage(safePage - 1) },
+            ].map(({ label, icon: Icon, disabled, onClick }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                disabled={disabled}
+                onClick={onClick}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-35"
+                style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+
+            <div
+              className="inline-flex h-10 min-w-[7.5rem] items-center justify-center rounded-xl px-4 text-xs font-black uppercase tracking-widest"
+              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.22)', color: '#a5b4fc' }}
+            >
+              {safePage} / {pageCount}
+            </div>
+
+            {[
+              { label: 'Next page', icon: ChevronRight, disabled: safePage === pageCount, onClick: () => goToPage(safePage + 1) },
+              { label: 'Last page', icon: ChevronsRight, disabled: safePage === pageCount, onClick: () => goToPage(pageCount) },
+            ].map(({ label, icon: Icon, disabled, onClick }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                disabled={disabled}
+                onClick={onClick}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-35"
+                style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+          </div>
+        </motion.nav>
+      )}
     </motion.div>
   );
 };

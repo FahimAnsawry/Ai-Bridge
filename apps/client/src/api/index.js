@@ -20,7 +20,8 @@ async function handleResponse(res) {
 /** GET /auth/status */
 export async function fetchAuthStatus() {
   const res = await fetch(`/auth/status`, { credentials: 'include' });
-  return res.json();
+  if (!res.ok) return { user: null };
+  return res.json().catch(() => ({ user: null }));
 }
 
 /** GET /api/status */
@@ -70,11 +71,12 @@ export async function fetchModelOfferings() {
 }
 
 /** POST /api/models/sync */
-export async function syncModels() {
+export async function syncModels({ providerId } = {}) {
   return handleResponse(
     await fetch(`${BASE}/models/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(providerId ? { providerId } : {}),
     })
   );
 }

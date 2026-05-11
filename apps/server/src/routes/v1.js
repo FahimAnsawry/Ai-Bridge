@@ -6,6 +6,8 @@
  *
  * Supported endpoints:
  *   POST /v1/chat/completions      — OpenAI Chat (streaming & non-streaming)
+ *   POST /v1/responses             — OpenAI Responses API
+ *   GET  /v1/responses/:id         — OpenAI Responses retrieval
  *   POST /v1/messages              — Anthropic Messages API (Claude Code, Cline)
  *   POST /v1/messages/count_tokens — Anthropic token counting
  *   GET  /v1/models                — Model list
@@ -21,16 +23,6 @@ const { proxyRequest } = require('../services/proxy');
 const { estimatePromptTokens } = require('../utils/token-budget');
 
 const router = express.Router();
-
-const GATEWAY_MODELS = [
-  { id: 'moonshotai/kimi-k2.6', owned_by: 'moonshot' },
-  { id: 'deepseek-ai/deepseek-v4-pro', owned_by: 'deepseek' },
-  { id: 'qwen/qwen3.5-397b-a17b', owned_by: 'qwen' },
-  { id: 'minimaxai/minimax-m2.7', owned_by: 'minimax' },
-  { id: 'z-ai/glm-5.1', owned_by: 'z-ai' },
-  { id: 'gemini-3.1-pro-preview', owned_by: 'google' },
-  { id: 'deepseek-v4-flash', owned_by: 'deepseek' },
-];
 
 // All routes under /v1 require a valid local API key (now using requireAccessKey)
 router.use(requireAccessKey);
@@ -48,6 +40,13 @@ router.use((req, res, next) => {
 
 // ── OpenAI Chat ───────────────────────────────────────────────────────────────
 router.post('/chat/completions', proxyRequest);
+
+// ── OpenAI Responses API ──────────────────────────────────────────────────────
+router.post('/responses', proxyRequest);
+router.get('/responses/:response', proxyRequest);
+router.delete('/responses/:response', proxyRequest);
+router.post('/responses/:response/cancel', proxyRequest);
+router.get('/responses/:response/input_items', proxyRequest);
 
 // ── Anthropic Messages API (Claude Code, Cline, Roo Code) ─────────────────────
 router.post('/messages', (req, res, next) => {
@@ -73,18 +72,7 @@ router.get('/messages/batches', proxyRequest);
 router.get('/messages/batches/:id', proxyRequest);
 
 // ── Models ────────────────────────────────────────────────────────────────────
-router.get('/models', (req, res) => {
-  const created = Math.floor(Date.now() / 1000);
-  return res.json({
-    object: 'list',
-    data: GATEWAY_MODELS.map((model) => ({
-      id: model.id,
-      object: 'model',
-      created,
-      owned_by: model.owned_by,
-    })),
-  });
-});
+router.get('/models', proxyRequest);
 
 router.get('/models/:model', (req, res) => {
   return res.json({

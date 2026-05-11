@@ -5,8 +5,8 @@ const crypto = require('crypto');
 const configSchema = new mongoose.Schema({
   port: { type: Number, default: 3000 },
   corsOrigins: { type: [String], default: ['*'] },
-  modelRouting: { type: String, default: 'fallback' },
-  modelMapping: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  modelRouting: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  activeModelId: { type: String, default: '' },
   stubModels: [String],
 }, { _id: false });
 

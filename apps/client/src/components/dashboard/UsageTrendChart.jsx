@@ -11,6 +11,7 @@ import {
   Legend,
 } from 'recharts';
 import { Activity } from 'lucide-react';
+import { getTokenTotal } from '../../utils/tokenUsage';
 
 const RANGES = ['24h', '7d', '30d'];
 
@@ -67,7 +68,7 @@ function generateChartData(logs = [], range) {
       const idx = Math.min(Math.floor((logTime - startTime) / bucketMs), bucketCount - 1);
       if (idx >= 0) {
         buckets[idx].requests += 1;
-        buckets[idx].tokens += (log.promptTokens || 0) + (log.completionTokens || 0);
+        buckets[idx].tokens += getTokenTotal(log);
       }
     }
   });

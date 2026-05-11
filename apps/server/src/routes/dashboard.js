@@ -20,13 +20,13 @@ const ALLOWED_CONFIG_FIELDS = [
   'local_api_key',
   'provider_base_url',
   'active_provider_id',
+  'active_model_id',
   'providers',
   'replace_providers',
   'port',
   'cors_origins',
   'api_keys',
   'model_routing',
-  'model_mapping',
   'custom_models',
   'stub_models',
   'request_minimization_enabled',
@@ -123,7 +123,7 @@ function createDashboardRouter(runtime) {
 
   router.post('/models/sync', async (req, res) => {
     try {
-      res.json(await adminService.syncModels(req.user._id));
+      res.json(await adminService.syncModels(req.user._id, { providerId: req.body?.providerId }));
     } catch (error) {
       const status = error.status || (error.code === 'missing_api_key' ? 400 : 500);
       res.status(status).json({

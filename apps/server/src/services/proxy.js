@@ -10,6 +10,11 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { loadConfig } = require('../config/config');
+const {
+  isNvidiaNimProvider,
+  isNvidiaNimValue,
+} = require('../utils/provider-detection');
+const { sanitizeNvidiaNimRequestBody } = require('../utils/nvidia-nim');
 
 const { addLog } = require('../middlewares/logger');
 const {
@@ -40,8 +45,295 @@ const httpsAgent = new https.Agent({
   freeSocketTimeout: 30000,
 });
 
+// Lazy connection warmup for NVIDIA NIM — pre-opens a TCP+TLS socket to
+// integrate.api.nvidia.com so the first real request skips DNS + TLS handshake.
+let nvidiaNimWarmedUp = false;
+function warmupNvidiaNimConnection() {
+  if (nvidiaNimWarmedUp) return;
+  nvidiaNimWarmedUp = true;
+  const req = https.request(
+    'https://integrate.api.nvidia.com/v1/models',
+    { method: 'GET', agent: httpsAgent, timeout: 10000 },
+    (res) => { res.resume(); }
+  );
+  req.on('error', () => {});
+  req.on('timeout', () => { req.destroy(); });
+  req.end();
+}
+
 const responseCache = new Map();
 const RESPONSE_CACHE_MAX_ENTRIES = 200;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 300_000;
+const DEFAULT_NVIDIA_NIM_TIMEOUT_MS = DEFAULT_UPSTREAM_TIMEOUT_MS;
+const DEFAULT_NVIDIA_NIM_SLOW_LOG_MS = 15_000;
+const claudeSettingsCache = new Map();
+
+// ── NVIDIA NIM Client-Side Rate Limiter ──────────────────────────────────────
+// Proactively enforces RPM / RPD limits per model so requests never reach the
+// upstream quota wall. Limits are configurable via env vars; free-tier defaults
+// match NVIDIA NIM's documented limits (5 RPM, 100 RPD).
+const NVIDIA_NIM_RPM_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPM_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 5; })();
+const NVIDIA_NIM_RPD_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPD_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 100; })();
+
+class NvidiaNimRateLimiter {
+  constructor(rpmLimit, rpdLimit) {
+    this.rpmLimit = rpmLimit;
+    this.rpdLimit = rpdLimit;
+    this._rpm = new Map(); // model -> sorted ms timestamps (last 60s)
+    this._rpd = new Map(); // model -> sorted ms timestamps (last 24h)
+  }
+
+  _get(map, model, cutoff) {
+    const times = (map.get(model) || []).filter(t => t > cutoff);
+    map.set(model, times);
+    return times;
+  }
+
+  /**
+   * Acquire a rate-limit slot for the given model.
+   * - If the daily quota is exhausted: returns { blocked: true, reason: 'daily' }.
+   * - If the per-minute quota is full: waits transparently until the next slot
+   *   opens, then records and returns { blocked: false }.
+   * - Otherwise: records immediately and returns { blocked: false }.
+   */
+  async acquire(model) {
+    const now = Date.now();
+    const rpd = this._get(this._rpd, model, now - 86_400_000);
+
+    if (rpd.length >= this.rpdLimit) {
+      return { blocked: true, reason: 'daily' };
+    }
+
+    const rpm = this._get(this._rpm, model, now - 60_000);
+    if (rpm.length >= this.rpmLimit) {
+      // Wait until the oldest in-window request ages out
+      const waitMs = Math.min(rpm[0] + 60_000 - Date.now() + 150, 65_000);
+      console.warn(
+        `[nvidia-nim-limiter] RPM limit (${this.rpmLimit}/min) reached for "${model}"; ` +
+        `queuing request for ${(waitMs / 1000).toFixed(1)}s`
+      );
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      // Re-check daily quota after the wait
+      const rpdAfter = this._get(this._rpd, model, Date.now() - 86_400_000);
+      if (rpdAfter.length >= this.rpdLimit) return { blocked: true, reason: 'daily' };
+    }
+
+    const ts = Date.now();
+    this._get(this._rpm, model, ts - 60_000).push(ts);
+    this._get(this._rpd, model, ts - 86_400_000).push(ts);
+    return { blocked: false };
+  }
+
+  /** Returns current usage stats for a model (for logging / debugging). */
+  stats(model) {
+    const now = Date.now();
+    return {
+      rpmUsed:  this._get(this._rpm, model, now - 60_000).length,
+      rpmLimit: this.rpmLimit,
+      rpdUsed:  this._get(this._rpd, model, now - 86_400_000).length,
+      rpdLimit: this.rpdLimit,
+    };
+  }
+}
+
+const nvidiaNimLimiter = new NvidiaNimRateLimiter(NVIDIA_NIM_RPM_LIMIT, NVIDIA_NIM_RPD_LIMIT);
+
+function getClaudeSettingsPath() {
+  const configDir = process.env.CLAUDE_CONFIG_DIR ||
+    (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.claude') : null) ||
+    (process.env.HOME ? path.join(process.env.HOME, '.claude') : null);
+  return configDir ? path.join(configDir, 'settings.json') : null;
+}
+
+function readClaudeSettings() {
+  const settingsPath = getClaudeSettingsPath();
+  if (!settingsPath) return null;
+
+  let stat;
+  try {
+    stat = fs.statSync(settingsPath);
+  } catch {
+    claudeSettingsCache.delete(settingsPath);
+    return null;
+  }
+
+  const cached = claudeSettingsCache.get(settingsPath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.settings;
+
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings });
+    return settings;
+  } catch (err) {
+    console.warn(`[proxy] Failed to read Claude settings from ${settingsPath}: ${err.message}`);
+    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings: null });
+    return null;
+  }
+}
+
+function writeClaudeSelectedModel(accessKey, model) {
+  const settingsPath = getClaudeSettingsPath();
+  const settings = readClaudeSettings();
+  if (!settingsPath || !settings || typeof settings !== 'object') return false;
+
+  const settingsToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
+  if (!accessKey || settingsToken !== accessKey) return false;
+
+  const selectedModel = typeof model === 'string' ? model.trim() : '';
+  if (!selectedModel) return false;
+
+  settings.model = selectedModel;
+
+  try {
+    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+    const stat = fs.statSync(settingsPath);
+    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings });
+    return true;
+  } catch (err) {
+    console.warn(`[proxy] Failed to write Claude selected model to ${settingsPath}: ${err.message}`);
+    claudeSettingsCache.delete(settingsPath);
+    return false;
+  }
+}
+
+function resolveClaudeSelectedModel(accessKey) {
+  const settings = readClaudeSettings();
+  if (!settings || typeof settings !== 'object') return null;
+
+  const settingsToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
+  if (!accessKey || settingsToken !== accessKey) return null;
+
+  const model = typeof settings.model === 'string' ? settings.model.trim() : '';
+  return normalizeClaudeModelAlias(model) || null;
+}
+
+function normalizeClaudeModelAlias(model) {
+  if (!model || typeof model !== 'string') return model;
+
+  const normalized = model.trim();
+
+  // Short alias: --model sonnet  →  claude-sonnet-4-6 (standard)
+  if (/^\.?sonnet$/i.test(normalized)) {
+    return 'claude-sonnet-4-6';
+  }
+
+  // 1M-context alias: --model sonnet[1m]  →  claude-sonnet-4.6
+  if (/^\.?sonnet\[1m\]$/i.test(normalized)) {
+    return 'claude-sonnet-4.6';
+  }
+
+  // Claude Code /model → Sonnet 4.6 (standard): claude-sonnet-4-6, claude-sonnet-4.6, claude-sonnet-4-6-20250514
+  if (/^claude-sonnet-4[-.]6(?:-\d{8})?$/i.test(normalized)) {
+    return 'claude-sonnet-4-6';
+  }
+
+  // Claude Code /model → Sonnet 4.6 (1M): claude-sonnet-4-6-20250514-1k, claude-sonnet-4.6-1m
+  if (/^claude-sonnet-4[-.]6(?:-\d{8})?-1[km]$/i.test(normalized)) {
+    return 'claude-sonnet-4.6';
+  }
+
+  return model;
+}
+
+function getPositiveEnvMs(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function getNvidiaNimTimeoutMs() {
+  return getPositiveEnvMs('NVIDIA_NIM_MAX_LOCAL_WAIT_MS', DEFAULT_NVIDIA_NIM_TIMEOUT_MS);
+}
+
+function getNvidiaNimSlowLogMs() {
+  return getPositiveEnvMs('NVIDIA_NIM_SLOW_LOG_MS', DEFAULT_NVIDIA_NIM_SLOW_LOG_MS);
+}
+
+function warnSlowNvidiaNimRequest({ phase, elapsedMs, model, providerName }) {
+  const thresholdMs = getNvidiaNimSlowLogMs();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < thresholdMs) return;
+  console.warn(
+    `[proxy] Slow NVIDIA NIM ${phase}: ${elapsedMs}ms` +
+    ` for model "${model || 'unknown'}"` +
+    ` on ${providerName || 'NVIDIA NIM'}`
+  );
+}
+
+function toTokenCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+
+function firstTokenCount(...values) {
+  for (const value of values) {
+    const count = toTokenCount(value);
+    if (count !== null) return count;
+  }
+  return null;
+}
+
+function hasTokenUsageFields(usage) {
+  if (!usage || typeof usage !== 'object') return false;
+  return firstTokenCount(
+    usage.prompt_tokens,
+    usage.input_tokens,
+    usage.promptTokens,
+    usage.inputTokens,
+    usage.completion_tokens,
+    usage.output_tokens,
+    usage.completionTokens,
+    usage.outputTokens,
+    usage.total_tokens,
+    usage.totalTokens
+  ) !== null;
+}
+
+function normalizeTokenUsage(source = {}) {
+  const usage = [
+    source?.usage,
+    source?.message?.usage,
+    source?.choices?.[0]?.usage,
+    source,
+  ].find(hasTokenUsageFields) || {};
+
+  const promptTokens = firstTokenCount(
+    usage.prompt_tokens,
+    usage.input_tokens,
+    usage.promptTokens,
+    usage.inputTokens
+  );
+  const completionTokens = firstTokenCount(
+    usage.completion_tokens,
+    usage.output_tokens,
+    usage.completionTokens,
+    usage.outputTokens
+  );
+  const explicitTotal = firstTokenCount(usage.total_tokens, usage.totalTokens);
+  const hasSplitUsage = promptTokens !== null || completionTokens !== null;
+  const totalTokens = explicitTotal ?? (hasSplitUsage ? (promptTokens || 0) + (completionTokens || 0) : 0);
+
+  return {
+    promptTokens: promptTokens || 0,
+    completionTokens: completionTokens || 0,
+    totalTokens,
+    hasUsage: explicitTotal !== null || hasSplitUsage,
+    hasExplicitTotal: explicitTotal !== null,
+  };
+}
+
+function mergeTokenUsage(current, next) {
+  if (!next?.hasUsage) return current;
+  const promptTokens = next.promptTokens || current.promptTokens || 0;
+  const completionTokens = next.completionTokens || current.completionTokens || 0;
+  const splitTotal = promptTokens + completionTokens;
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: next.hasExplicitTotal ? next.totalTokens : Math.max(splitTotal, next.totalTokens || 0, current.totalTokens || 0),
+    hasUsage: true,
+    hasExplicitTotal: next.hasExplicitTotal || current.hasExplicitTotal || false,
+  };
+}
 /**
  * normalizeMessages — Ensures the messages array conforms to expectations
  * of common OpenAI-style upstreams, even if the client is Anthropic-style.
@@ -492,104 +784,6 @@ function normalizeToolChoice(toolChoice) {
   return toolChoice;
 }
 
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function flattenMessageContentForNvidiaNim(content) {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (content === null || content === undefined) {
-    return ' ';
-  }
-
-  if (Array.isArray(content)) {
-    const text = content
-      .map((block) => {
-        if (typeof block === 'string') return block;
-        if (!block || typeof block !== 'object') return '';
-        if (typeof block.text === 'string') return block.text;
-        if (typeof block.input_text === 'string') return block.input_text;
-        if (typeof block.content === 'string') return block.content;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n')
-      .trim();
-
-    return text || ' ';
-  }
-
-  if (typeof content === 'object') {
-    try {
-      return JSON.stringify(content);
-    } catch {
-      return String(content);
-    }
-  }
-
-  return String(content);
-}
-
-function sanitizeNvidiaNimRequestBody(bodyData) {
-  if (!bodyData || typeof bodyData !== 'object') return bodyData;
-
-  delete bodyData.tools;
-  delete bodyData.tool_choice;
-  delete bodyData.parallel_tool_calls;
-
-  const unsupportedObjectFields = [
-    'response_format',
-    'stream_options',
-    'prediction',
-    'logit_bias',
-    'extra_body',
-    'extra_headers',
-    'web_search_options',
-    'reasoning',
-    'audio',
-  ];
-  unsupportedObjectFields.forEach((field) => {
-    delete bodyData[field];
-  });
-
-  if (isPlainObject(bodyData.stop)) {
-    delete bodyData.stop;
-  }
-
-  if (Array.isArray(bodyData.messages)) {
-    bodyData.messages = bodyData.messages
-      .map((message) => {
-        if (!message || typeof message !== 'object') return message;
-        if (message.role === 'tool') return null;
-        const hadToolCall = Array.isArray(message.tool_calls) || Boolean(message.function_call);
-
-        const cleaned = {
-          ...message,
-          content: flattenMessageContentForNvidiaNim(message.content),
-        };
-
-        delete cleaned.tool_calls;
-        delete cleaned.function_call;
-
-        if (hadToolCall && !String(cleaned.content || '').trim()) {
-          return null;
-        }
-
-        return cleaned;
-      })
-      .filter(Boolean);
-
-    if (!bodyData.messages.some((message) => message?.role === 'user')) {
-      bodyData.messages.push({ role: 'user', content: 'Please continue.' });
-    }
-  }
-
-  return bodyData;
-}
-
 /**
  * normalizeSystemPrompt — Converts Anthropic-style `system` into an
  * OpenAI-compatible system message for non-Anthropic upstreams.
@@ -656,10 +850,13 @@ function translateOpenAIToAnthropic(openaiRes, model) {
     content: content,
     stop_reason: stopReason,
     stop_sequence: null,
-    usage: {
-      input_tokens: openaiRes.usage?.prompt_tokens || 0,
-      output_tokens: openaiRes.usage?.completion_tokens || 0
-    }
+    usage: (() => {
+      const usage = normalizeTokenUsage(openaiRes);
+      return {
+        input_tokens: usage.promptTokens,
+        output_tokens: usage.completionTokens,
+      };
+    })()
   };
 }
 
@@ -888,17 +1085,29 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   const isAnthropic = baseUrl.includes('anthropic.com');
   const isEcom = baseUrl.includes('ecom');
   const isCopilotBridge = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
-  const isNvidiaNimRequest = req.__startedOnNvidiaNim === true || isNvidiaNimValue(baseUrl);
+  const isNvidiaNimRequest = req.__startedOnNvidiaNim === true ||
+    req.__upstreamProviderIsNvidiaNim === true ||
+    isNvidiaNimValue(baseUrl);
+  // NIM is OpenAI-compatible for chat generation. Sending Anthropic /messages
+  // payloads through unchanged can surface Python/vLLM errors such as
+  // "unhashable type: 'dict'" when fields like tool_choice are objects.
+  const useNativeNvidiaMessages = false;
+  req.__nativeNvidiaNimMessages = useNativeNvidiaMessages;
   if (isCopilotBridge) {
     headers['x-ai-bridge-upstream-hop'] = '1';
   }
 
-  if (upstreamPath.endsWith('/messages') && !isAnthropic && !isCopilotBridge) {
+  if (upstreamPath.endsWith('/messages') && !isAnthropic && !isCopilotBridge && !useNativeNvidiaMessages) {
     // console.log(`[proxy] Mapping /messages → /chat/completions for ${isEcom ? 'ecom' : 'OpenAI-compatible'} upstream`);
     upstreamPath = upstreamPath.replace('/messages', '/chat/completions');
   }
 
   let cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+  if (isNvidiaNimRequest) {
+    cleanBaseUrl = cleanBaseUrl
+      .replace(/\/v1\/chat\/completions$/i, '/v1')
+      .replace(/\/chat\/completions$/i, '');
+  }
 
   if (isGitHubModels) {
     // GitHub Models API uses /inference prefix instead of /v1
@@ -924,7 +1133,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   if (bodyData && typeof bodyData === 'object') {
     bodyData = { ...bodyData };
     // Normalization: Ensure valid messages for common upstreams
-    if (bodyData.messages) {
+    if (!useNativeNvidiaMessages && bodyData.messages) {
       // Restore original (pre-normalization) messages on retry so we don't
       // double-normalize — previous calls may have mutated req.body.messages
       // in-place (e.g. injected synthetic tool responses).
@@ -967,7 +1176,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     }
 
     // Normalization: Convert tools and tool_choice if upstream is not Anthropic
-    if (!baseUrl.includes('anthropic.com')) {
+    if (!useNativeNvidiaMessages && !baseUrl.includes('anthropic.com')) {
       if (bodyData.tools) {
         bodyData.tools = normalizeTools(bodyData.tools);
       }
@@ -980,20 +1189,22 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
 
 
     // Remove Anthropic-specific fields that cause 503 on non-Anthropic upstreams
-    const FIELDS_TO_REMOVE = [
-      'thinking', 'betas', 'top_k', 'context_management', 'output_config', 'metadata'
-    ];
-    FIELDS_TO_REMOVE.forEach(f => delete bodyData[f]);
+    if (!useNativeNvidiaMessages) {
+      const FIELDS_TO_REMOVE = [
+        'thinking', 'betas', 'top_k', 'context_management', 'output_config', 'metadata'
+      ];
+      FIELDS_TO_REMOVE.forEach(f => delete bodyData[f]);
+    }
 
-    if (isNvidiaNimRequest) {
-      sanitizeNvidiaNimRequestBody(bodyData);
+    if (isNvidiaNimRequest && !useNativeNvidiaMessages) {
+      sanitizeNvidiaNimRequestBody(bodyData, { preserveTools: req.__nvidiaNimStripTools !== true });
     }
   }
 
   // EcomAgent only supports: claude-opus-4-6, claude-opus-4.6, mmodel, claudex-4.7-5.4
   // Map ALL claude variants to claude-opus-4.6 (dot-notation required).
   // Sonnet, haiku, and any other claude model are NOT available on EcomAgent.
-  if (isEcom && bodyData?.model) {
+  if (isEcom && bodyData?.model && req.__skipModelMappingForRateLimitFallback !== true && req.__strictProviderRouting !== true) {
     const originalEcomModel = bodyData.model;
     // If it's any claude model that isn't already opus-4.6, remap to opus
     if (/claude/i.test(bodyData.model)) {
@@ -1036,7 +1247,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     data: bodyData,
     responseType: 'stream',
     decompress: true,
-    timeout: 300_000,
+    timeout: isNvidiaNimRequest ? getNvidiaNimTimeoutMs() : DEFAULT_UPSTREAM_TIMEOUT_MS,
     params: req.query,
     httpAgent: agent === httpAgent ? agent : undefined,
     httpsAgent: agent === httpsAgent ? agent : undefined,
@@ -1045,7 +1256,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
 
 
 function isChatGenerationRequest(req) {
-  return req.path === '/messages' || req.path === '/chat/completions';
+  return req.path === '/messages' || req.path === '/chat/completions' || req.path === '/responses';
 }
 
 function initializeAttemptState(req, config) {
@@ -1094,19 +1305,137 @@ function attemptLabel(req) {
   return ` (attempt ${state.usedAttempts}/${state.maxAttempts})`;
 }
 
-function isNvidiaNimValue(value) {
-  if (!value || typeof value !== 'string') return false;
-  const normalized = value.toLowerCase();
-  return normalized.includes('nvidia') ||
-    normalized.includes('nvdia') ||
-    normalized.includes('nim');
+function providerHasBaseUrlAndKey(provider) {
+  if (!provider || typeof provider !== 'object') return false;
+  const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
+  const hasApiKey = Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
+  return hasBaseUrl && hasApiKey;
 }
 
-function isNvidiaNimProvider(provider) {
-  if (!provider || typeof provider !== 'object') return false;
-  return isNvidiaNimValue(provider.id) ||
-    isNvidiaNimValue(provider.name) ||
-    isNvidiaNimValue(provider.baseUrl);
+function normalizeBaseUrlForMatch(value) {
+  return typeof value === 'string' ? value.replace(/\/+$/, '') : '';
+}
+
+function findModelRoute(model, modelRouting) {
+  if (!model || !modelRouting || typeof modelRouting !== 'object' || Array.isArray(modelRouting)) return null;
+  const requestedModel = String(model);
+  const exactTarget = typeof modelRouting[requestedModel] === 'string' ? modelRouting[requestedModel].trim() : '';
+  if (exactTarget) {
+    return { model: requestedModel, target: exactTarget, exact: true };
+  }
+
+  return Object.entries(modelRouting)
+    .filter(([key, target]) =>
+      key &&
+      typeof target === 'string' &&
+      target.trim() &&
+      requestedModel.startsWith(key)
+    )
+    .sort(([a], [b]) => b.length - a.length)
+    .map(([key, target]) => ({ model: key, target: target.trim(), exact: false }))
+    [0] || null;
+}
+
+function resolveRoutedProvider(routeTarget, providers) {
+  const target = String(routeTarget || '').trim();
+  if (!target) return null;
+
+  return (Array.isArray(providers) ? providers : []).find((provider) => {
+    if (!provider) return false;
+    if (provider.id === target) return true;
+    const providerBaseUrl = normalizeBaseUrlForMatch(provider.baseUrl);
+    const targetBaseUrl = normalizeBaseUrlForMatch(target);
+    return providerBaseUrl && targetBaseUrl && providerBaseUrl === targetBaseUrl;
+  }) || null;
+}
+
+function sendModelRouteConfigError(req, res, message, code = 'invalid_model_route') {
+  console.warn(`[proxy] ${message}`);
+
+  if (req.path.includes('/messages')) {
+    return res.status(503).json({
+      type: 'error',
+      error: {
+        type: 'api_error',
+        message,
+      },
+    });
+  }
+
+  return res.status(503).json({
+    error: {
+      message,
+      type: 'server_error',
+      code,
+    },
+  });
+}
+
+function providerCanPreserveModelForRateLimitFallback(provider, model) {
+  if (!providerHasBaseUrlAndKey(provider)) return false;
+  if (!model || typeof model !== 'string') return true;
+
+  // EcomAgent remaps Claude-family models in buildUpstreamRequest. A 429 fallback
+  // must preserve the exact requested model to avoid changing output quality.
+  if (provider.baseUrl && provider.baseUrl.toLowerCase().includes('ecom') && /claude/i.test(model)) {
+    return false;
+  }
+
+  if (isTimyProvider(provider) && normalizeTimyModel(model) !== model) {
+    return false;
+  }
+
+  return true;
+}
+
+function sendAttemptBudgetExhausted(req, res) {
+  const state = req.__attemptState;
+  const maxAttempts = state?.maxAttempts || 0;
+  const message = `Request attempt budget exhausted (${maxAttempts} max upstream attempts).`;
+  console.warn(`[proxy] ${message}`);
+
+  if (req.path.includes('/messages')) {
+    return res.status(429).json({
+      type: 'error',
+      error: {
+        type: 'rate_limit_error',
+        message,
+      }
+    });
+  }
+
+  return res.status(429).json({
+    error: {
+      message,
+      type: 'rate_limit_error',
+      code: 'attempt_budget_exhausted',
+    },
+  });
+}
+
+const TIMY_SUPPORTED_MODELS = [
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+];
+
+function isTimyProvider(providerOrBaseUrl) {
+  const baseUrl = typeof providerOrBaseUrl === 'string'
+    ? providerOrBaseUrl
+    : providerOrBaseUrl?.baseUrl;
+  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('timyai.com');
+}
+
+function normalizeTimyModel(model) {
+  if (!model || typeof model !== 'string') return model;
+  return model
+    .replace(/^claude-sonnet-4\.6$/i, 'claude-sonnet-4-6')
+    .replace(/^claude-opus-4\.6$/i, 'claude-opus-4-6')
+    .replace(/^claude-opus-4\.7$/i, 'claude-opus-4-7');
+}
+
+function getTimyUnsupportedModelMessage(model) {
+  return `Timy only supports these model ids: ${TIMY_SUPPORTED_MODELS.join(', ')}. Requested model: "${model || 'unknown'}".`;
 }
 
 function normalizeRemovedClaudeHaikuModel(model) {
@@ -1115,6 +1444,74 @@ function normalizeRemovedClaudeHaikuModel(model) {
     return 'claude-sonnet-4-6';
   }
   return model;
+}
+
+/**
+ * parseKimiToolCallTokens — Parses moonshotai/kimi-style tool-call special tokens
+ * embedded inside choice.delta.content into a standard tool_calls array.
+ *
+ * Kimi format (streamed as plain content text, not as tool_calls):
+ *   <|tool_calls_section_begin|>
+ *   <|tool_call_begin|>functions.Agent:0<|tool_call_argument_begin|>{...}<|tool_call_end|>
+ *   <|tool_calls_section_end|>
+ *
+ * Returns { preSectionText, toolCalls } where toolCalls is an array compatible
+ * with AnthropicSSETranslator.pushToolCallDelta().
+ */
+function parseKimiToolCallTokens(text) {
+  const sectionStart = '<|tool_calls_section_begin|>';
+  const sectionEnd   = '<|tool_calls_section_end|>';
+  const callBegin    = '<|tool_call_begin|>';
+  const argBegin     = '<|tool_call_argument_begin|>';
+  const callEnd      = '<|tool_call_end|>';
+
+  const secStartIdx = text.indexOf(sectionStart);
+  const secEndIdx   = text.indexOf(sectionEnd);
+  if (secStartIdx === -1 || secEndIdx === -1) return null;
+
+  const preSectionText  = text.slice(0, secStartIdx);
+  const postSectionText = text.slice(secEndIdx + sectionEnd.length);
+  const sectionBody     = text.slice(secStartIdx + sectionStart.length, secEndIdx);
+
+  const toolCalls = [];
+  let searchPos = 0;
+  let callIndex = 0;
+
+  while (true) {
+    const cbIdx = sectionBody.indexOf(callBegin, searchPos);
+    if (cbIdx === -1) break;
+
+    const afterCallBegin = cbIdx + callBegin.length;
+    const argIdx = sectionBody.indexOf(argBegin, afterCallBegin);
+    if (argIdx === -1) break;
+
+    const ceIdx = sectionBody.indexOf(callEnd, argIdx + argBegin.length);
+    if (ceIdx === -1) break;
+
+    const funcRef   = sectionBody.slice(afterCallBegin, argIdx).trim();
+    const argsRaw   = sectionBody.slice(argIdx + argBegin.length, ceIdx).trim();
+
+    // funcRef format: "functions.FunctionName:index" or just "FunctionName"
+    // Strip the namespace prefix and the trailing :index
+    const funcName = funcRef
+      .replace(/^[^.]+\./, '')  // remove "functions." prefix
+      .replace(/:\d+$/, '');    // remove ":0", ":1" suffix
+
+    toolCalls.push({
+      index: callIndex,
+      id: `toolu_kimi_${callIndex}_${Math.random().toString(36).slice(2, 8)}`,
+      type: 'function',
+      function: {
+        name: funcName || 'unknown_tool',
+        arguments: argsRaw,
+      },
+    });
+
+    callIndex++;
+    searchPos = ceIdx + callEnd.length;
+  }
+
+  return { preSectionText, postSectionText, toolCalls };
 }
 
 /**
@@ -1140,16 +1537,73 @@ async function proxyRequest(req, res) {
   }
 
   const configStart = Date.now();
-  const config = await loadConfig(userId, { includeCatalogs: req.path === '/models' });
+  const config = await loadConfig(userId, { includeCatalogs: true });
   timing.configMs = Date.now() - configStart;
-  const attemptState = initializeAttemptState(req, config);
+  const strictProviderRouting = isChatGenerationRequest(req);
+  req.__strictProviderRouting = strictProviderRouting;
+  if (strictProviderRouting && req.body && typeof req.body === 'object') {
+    const requestModel = typeof req.body.model === 'string'
+      ? normalizeClaudeModelAlias(req.body.model.trim())
+      : '';
+    const selectedModel = resolveClaudeSelectedModel(accessKey);
+
+    if (selectedModel) {
+      // Enforce the stored model selection for ALL requests.
+      // Claude CLI sends background requests (tool calls, context compression, etc.)
+      // with its own default model (e.g. claude-sonnet-4-6) even when the user
+      // explicitly passed --model gpt-5.5. Without this guard those background
+      // requests would silently overwrite the user's selection in settings.json
+      // and all subsequent requests would switch to claude-sonnet-4-6.
+      req.body.model = selectedModel;
+    } else if (requestModel) {
+      // No stored selection yet — use the request model and persist it.
+      req.body.model = requestModel;
+      writeClaudeSelectedModel(accessKey, requestModel);
+    }
+  }
   if (req.body?.model) {
+    const normalizedAliasModel = normalizeClaudeModelAlias(req.body.model);
+    if (normalizedAliasModel !== req.body.model) {
+      req.body.model = normalizedAliasModel;
+    }
+    if (typeof req.body.model === 'string' && req.body.model.startsWith('/')) {
+      req.body.model = req.body.model.replace(/^\/+/, '');
+    }
+  }
+  const attemptState = initializeAttemptState(req, config);
+  if (!strictProviderRouting && req.body?.model) {
     const normalizedModel = normalizeRemovedClaudeHaikuModel(req.body.model);
     if (normalizedModel !== req.body.model) {
       req.body.model = normalizedModel;
     }
   }
   const requestedModel = req.body?.model || 'unknown';
+
+  // ── Model-Route Gate ──────────────────────────────────────────────────────
+  // If model_routing has entries, only allow models that have a route defined.
+  // Non-chat requests (embeddings, /models, audio, etc.) are exempt.
+  if (isChatGenerationRequest(req) && req.body?.model) {
+    const routing = config.model_routing;
+    const hasAnyRoutes = routing && typeof routing === 'object' && !Array.isArray(routing) && Object.keys(routing).length > 0;
+    if (hasAnyRoutes) {
+      const route = findModelRoute(requestedModel, routing);
+      if (!route) {
+        const modelId = requestedModel;
+        const message = `Model "${modelId}" is not added to model routes. Please add it in Settings → Model Routing before using it.`;
+        console.warn(`[proxy] Model-route gate blocked: ${message}`);
+        if (req.path.includes('/messages')) {
+          return res.status(400).json({
+            type: 'error',
+            error: { type: 'invalid_request_error', message },
+          });
+        }
+        return res.status(400).json({
+          error: { message, type: 'invalid_request_error', code: 'model_not_in_routes' },
+        });
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const optimizationEnabled = config.token_optimization_enabled === true;
   const promptBudget = Number(config.prompt_budget_tokens) > 0 ? Number(config.prompt_budget_tokens) : 12000;
@@ -1176,26 +1630,9 @@ async function proxyRequest(req, res) {
   };
 
   if (attemptState.applies && attemptState.enabled) {
-    const { allowed, state } = consumeAttempt(req);
+    const { allowed } = consumeAttempt(req);
     if (!allowed) {
-      const message = `Request attempt budget exhausted (${state.maxAttempts} max upstream attempts).`;
-      console.warn(`[proxy] ${message}`);
-      if (req.path.includes('/messages')) {
-        return res.status(429).json({
-          type: 'error',
-          error: {
-            type: 'rate_limit_error',
-            message,
-          }
-        });
-      }
-      return res.status(429).json({
-        error: {
-          message,
-          type: 'rate_limit_error',
-          code: 'attempt_budget_exhausted',
-        },
-      });
+      return sendAttemptBudgetExhausted(req, res);
     }
     // console.log(`[proxy] Outbound attempt ${state.usedAttempts}/${state.maxAttempts} for ${req.path}`);
   } else if (attemptState.applies) {
@@ -1261,17 +1698,35 @@ async function proxyRequest(req, res) {
   const configuredProviders = Array.isArray(config.providers) ? config.providers : [];
   const selectedProvidersForCache = configuredProviders.filter((p) => p?.isActive !== false);
   const eligibleProvidersForCache = selectedProvidersForCache;
+  const preCacheModelRoute = findModelRoute(req.body?.model || '', config.model_routing);
+  if (preCacheModelRoute) {
+    const preCacheRoutedProvider = resolveRoutedProvider(preCacheModelRoute.target, configuredProviders);
+    if (!preCacheRoutedProvider) {
+      return sendModelRouteConfigError(
+        req,
+        res,
+        `Model route "${preCacheModelRoute.model}" points to provider "${preCacheModelRoute.target}", but that provider is not configured.`
+      );
+    }
+    if (!providerHasBaseUrlAndKey(preCacheRoutedProvider)) {
+      return sendModelRouteConfigError(
+        req,
+        res,
+        `Model route "${preCacheModelRoute.model}" points to provider "${preCacheRoutedProvider.name || preCacheRoutedProvider.id}", but it is missing a base URL or API key.`,
+        'model_route_provider_not_ready'
+      );
+    }
+  }
 
   let cacheKey = null;
   if (cacheEligible) {
     const requestedForCache = req.body?.model || '';
-    const routedCacheUrl = config.model_routing && typeof config.model_routing === 'object'
-      ? (config.model_routing[requestedForCache] || Object.entries(config.model_routing).find(([key]) => requestedForCache.startsWith(key))?.[1])
+    const routedCacheTarget = findModelRoute(requestedForCache, config.model_routing)?.target || null;
+    const routedCacheProvider = routedCacheTarget
+      ? resolveRoutedProvider(routedCacheTarget, eligibleProvidersForCache)
       : null;
     const cacheProviderId = req.__currentProviderId
-      || (routedCacheUrl
-        ? eligibleProvidersForCache.find((p) => p.baseUrl && p.baseUrl.replace(/\/+$/, '') === routedCacheUrl.replace(/\/+$/, ''))?.id
-        : null)
+      || routedCacheProvider?.id
       || config.active_provider_id
       || 'active';
 
@@ -1279,14 +1734,16 @@ async function proxyRequest(req, res) {
     const cached = readCachedResponse(responseCache, cacheKey);
     if (cached) {
       optimizationMeta.cacheHit = true;
+      const cachedUsage = normalizeTokenUsage(cached);
       await addLog({
         method: req.method,
         path: req.path,
         model: requestedModel,
         status: 200,
         latencyMs: Date.now() - startTime,
-        promptTokens: cached.usage?.prompt_tokens || 0,
-        completionTokens: cached.usage?.completion_tokens || 0,
+        promptTokens: cachedUsage.promptTokens,
+        completionTokens: cachedUsage.completionTokens,
+        totalTokens: cachedUsage.totalTokens,
         streaming: false,
         provider: 'cache',
         optimization: optimizationMeta,
@@ -1298,16 +1755,29 @@ async function proxyRequest(req, res) {
     optimizationMeta.cacheHit = false;
   }
   if (req.method === 'GET' && req.path === '/models') {
-    const modelList = Array.isArray(config.model_catalogs) 
-      ? config.model_catalogs.reduce((acc, cat) => acc.concat(cat.models || []), [])
-      : [];
+    const modelCatalogs = Array.isArray(config.model_catalogs) ? config.model_catalogs : [];
+    const activeProviderForModels = configuredProviders.find((p) => p.id === config.active_provider_id) || null;
+    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProviderForModels);
+    const activeCatalog = activeProviderForModels
+      ? modelCatalogs.find((cat) => cat.providerId === activeProviderForModels.id)
+      : null;
+    const modelList = activeProviderIsNvidiaNim
+      ? (activeCatalog?.models || [])
+      : modelCatalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
     const now = Math.floor(Date.now() / 1000);
-    const data = modelList.map((m) => ({
-      id: m.id,
-      object: 'model',
-      created: now,
-      owned_by: m.owned_by || 'custom',
-    }));
+    const seenModelIds = new Set();
+    const data = modelList
+      .filter((m) => {
+        if (!m?.id || seenModelIds.has(m.id)) return false;
+        seenModelIds.add(m.id);
+        return true;
+      })
+      .map((m) => ({
+        id: m.id,
+        object: 'model',
+        created: now,
+        owned_by: m.owned_by || 'custom',
+      }));
     return res.json({ object: 'list', data });
   }
 
@@ -1320,30 +1790,47 @@ async function proxyRequest(req, res) {
   const providers = configuredProviders;
   const selectedProviders = providers.filter((p) => p?.isActive !== false);
   const eligibleProviders = selectedProviders;
-  const hasUsableProvider = (provider) => {
-    if (!provider || typeof provider !== 'object') return false;
-    const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
-    const hasApiKey = Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
-    return hasBaseUrl && hasApiKey;
-  };
+  const hasUsableProvider = providerHasBaseUrlAndKey;
+  const requestedModelForRouting = req.body?.model || '';
+  const fixedModelRoute = findModelRoute(requestedModelForRouting, config.model_routing);
+  let fixedRouteProvider = null;
+
+  if (fixedModelRoute) {
+    // Fixed routes search ALL configured providers, not just the active/default one.
+    // isActive on a provider only controls default-provider behavior and fallback eligibility,
+    // not whether it can be explicitly targeted by a model route.
+    fixedRouteProvider = resolveRoutedProvider(fixedModelRoute.target, configuredProviders);
+    if (!fixedRouteProvider) {
+      return sendModelRouteConfigError(
+        req,
+        res,
+        `Model route "${fixedModelRoute.model}" points to provider "${fixedModelRoute.target}", but that provider is not configured.`
+      );
+    }
+    if (!providerHasBaseUrlAndKey(fixedRouteProvider)) {
+      return sendModelRouteConfigError(
+        req,
+        res,
+        `Model route "${fixedModelRoute.model}" points to provider "${fixedRouteProvider.name || fixedRouteProvider.id}", but it is missing a base URL or API key.`,
+        'model_route_provider_not_ready'
+      );
+    }
+    req.__fixedModelRouteProviderId = fixedRouteProvider.id;
+    req.__fixedModelRouteKey = fixedModelRoute.model;
+  }
 
   const configuredActiveProvider = eligibleProviders.find((p) => p.id === config.active_provider_id) || null;
   const configuredActiveProviderIsNvidiaNim = isNvidiaNimProvider(configuredActiveProvider);
-  const requestedModelForProvider = req.body?.model || '';
-  const requestedModelIsClaude = /^claude(?:[-.\s]|$)/i.test(requestedModelForProvider);
-  const firstUsableNonNvidiaProvider = eligibleProviders.find(
-    (p) => hasUsableProvider(p) && !isNvidiaNimProvider(p)
-  );
-  let providerToUseId = config.active_provider_id;
+  let providerToUseId = fixedRouteProvider?.id || config.active_provider_id;
 
   // req.__currentProviderId carries provider IDs set during auto-switch or
   // fallback retries — those take precedence over everything so we never
   // "undo" an automatic recovery decision.
-  if (req.__currentProviderId) {
+  if (fixedRouteProvider) {
+    providerToUseId = fixedRouteProvider.id;
+  } else if (req.__currentProviderId && !strictProviderRouting) {
     providerToUseId = req.__currentProviderId;
-  } else if (configuredActiveProviderIsNvidiaNim && requestedModelIsClaude && firstUsableNonNvidiaProvider) {
-    providerToUseId = firstUsableNonNvidiaProvider.id;
-  } else if (clientRequestedProviderId && !configuredActiveProviderIsNvidiaNim) {
+  } else if (clientRequestedProviderId && !configuredActiveProviderIsNvidiaNim && !strictProviderRouting) {
     // Try to match by provider ID first, then by baseUrl suffix.
     const matchById = eligibleProviders.find(
       (p) => p.id === clientRequestedProviderId
@@ -1359,18 +1846,43 @@ async function proxyRequest(req, res) {
     if (matchById || matchByUrl) {
       providerToUseId = (matchById || matchByUrl).id;
     }
+  } else if (strictProviderRouting && !fixedRouteProvider && requestedModelForRouting) {
+    // Auto-detect provider from model catalogs when the selected model isn't in model_routing.
+    // This ensures `claude --model gpt-5.5` routes to the provider that actually offers gpt-5.5,
+    // rather than always falling back to the active provider.
+    const modelCatalogs = Array.isArray(config.model_catalogs) ? config.model_catalogs : [];
+    for (const catalog of modelCatalogs) {
+      if (!catalog.providerId || !Array.isArray(catalog.models)) continue;
+      const found = catalog.models.some(
+        (m) => m && typeof m.id === 'string' && m.id === requestedModelForRouting
+      );
+      if (found) {
+        // Only auto-route to providers that are configured and usable
+        const catalogProvider = configuredProviders.find((p) => p.id === catalog.providerId);
+        if (catalogProvider && providerHasBaseUrlAndKey(catalogProvider)) {
+          providerToUseId = catalog.providerId;
+          // console.log(`[proxy] Auto-routed model "${requestedModelForRouting}" → provider "${catalog.providerId}" via catalog`);
+        }
+        break;
+      }
+    }
   }
 
-  const providerById = eligibleProviders.find((p) => p.id === providerToUseId) || null;
+  // For fixed model routes, use the already-resolved fixedRouteProvider directly (it was resolved
+  // from all configuredProviders). For other requests, look up in eligibleProviders as usual.
+  const providerById = fixedRouteProvider || eligibleProviders.find((p) => p.id === providerToUseId) || null;
   const firstUsableProvider = eligibleProviders.find(hasUsableProvider) || null;
   
   const isNvidiaNimActive = isNvidiaNimProvider(providerById);
 
-  const activeProvider = providerById && hasUsableProvider(providerById)
+  const activeProvider = strictProviderRouting
     ? providerById
-    : (isNvidiaNimActive ? providerById : (firstUsableProvider || providerById || eligibleProviders[0] || null));
+    : (providerById && hasUsableProvider(providerById)
+      ? providerById
+      : (isNvidiaNimActive ? providerById : (firstUsableProvider || providerById || eligibleProviders[0] || null)));
   const requestStartedOnNvidiaNim = isNvidiaNimProvider(activeProvider);
   req.__startedOnNvidiaNim = requestStartedOnNvidiaNim;
+  if (requestStartedOnNvidiaNim) warmupNvidiaNimConnection();
     
   let upstreamProvider = activeProvider;
   let providerName = activeProvider ? activeProvider.name : 'unknown';
@@ -1410,45 +1922,6 @@ async function proxyRequest(req, res) {
   const maskedKey = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'none';
   // console.log(`[proxy] Active provider: ${activeProvider.name} (${baseUrl}) using key: ${maskedKey}`);
 
-  // ── Model Routing Override ─────────────────────────────────────────────────
-  // If config.model_routing maps the requested model to a specific baseUrl,
-  // use that provider instead of the active one (allows per-model routing).
-  // Note: We skip routing if we are in the middle of an auto-switch retry.
-  const requestedModelForRouting = req.body?.model || '';
-  if (!requestStartedOnNvidiaNim && !req.__currentProviderId && config.model_routing && typeof config.model_routing === 'object') {
-    // Check exact match first, then prefix match (e.g. "gemini" covers all gemini-* models)
-    const routeUrl =
-      config.model_routing[requestedModelForRouting] ||
-      Object.entries(config.model_routing).find(([key]) =>
-        requestedModelForRouting.startsWith(key)
-      )?.[1];
-
-    if (routeUrl) {
-      // Find the provider whose baseUrl matches so we can get its apiKey
-      const routedProvider = eligibleProviders.find(
-        (p) => p.baseUrl && (p.baseUrl.replace(/\/+$/, '') === routeUrl.replace(/\/+$/, ''))
-      );
-      if (!routedProvider) {
-        // Ignore model routes targeting providers that are not selected for this user.
-      } else {
-        baseUrl = routeUrl;
-        upstreamProvider = routedProvider;
-        providerName = routedProvider.name || routedProvider.id || providerName;
-
-        if (!req.__triedKeys[routedProvider.id]) req.__triedKeys[routedProvider.id] = new Set();
-        apiKey = (routedProvider.apiKeys && routedProvider.apiKeys.length > 0)
-          ? routedProvider.apiKeys.find(k => !req.__triedKeys[routedProvider.id].has(k))
-          : routedProvider.apiKey;
-        if (!apiKey && routedProvider.apiKey) apiKey = routedProvider.apiKey;
-      }
-
-      // console.log(
-      //   `[proxy] model_routing: "${requestedModelForRouting}" → ${routeUrl}` +
-      //   (routedProvider ? ` (${routedProvider.name})` : ' (key: inherited)')
-      // );
-    }
-  }
-
   if (!apiKey) {
     console.error(`[proxy] ❌ No API key found for provider "${activeProvider.name}" (ID: ${activeProvider.id})`);
     if (req.path.includes('/messages')) {
@@ -1469,7 +1942,7 @@ async function proxyRequest(req, res) {
     });
   }
 
-  // ── Model Mapping ──────────────────────────────────────────────────────────
+  // ── Model Selection ────────────────────────────────────────────────────────
   let targetModel = req.body?.model || 'unknown';
 
   // Sanitize: strip any leading slash from the model name (e.g. "/gemini-3.1-pro-preview" → "gemini-3.1-pro-preview")
@@ -1486,9 +1959,26 @@ async function proxyRequest(req, res) {
     isNvidiaNimProvider(upstreamProvider) ||
     isNvidiaNimValue(providerName) ||
     isNvidiaNimValue(baseUrl);
+  req.__upstreamProviderIsNvidiaNim = isNvidiaNimUpstream;
 
   if (isNvidiaNimUpstream && (!targetModel || targetModel === 'unknown' || /^claude[-.]/i.test(targetModel))) {
-    const message = `NVIDIA NIM is active, but the client requested "${targetModel}". Set the client model to an NVIDIA NIM model id; the proxy will not substitute a default model.`;
+    let examples = [];
+    try {
+      const activeCatalog = (config.model_catalogs || []).find(
+        (catalog) => catalog.providerId === upstreamProvider?.id || catalog.providerId === activeProvider?.id
+      );
+      examples = (activeCatalog?.models || [])
+        .map((model) => model?.id)
+        .filter(Boolean)
+        .slice(0, 3);
+    } catch {
+      examples = [];
+    }
+
+    const exampleText = examples.length
+      ? ` Try one of these synced NIM model ids: ${examples.join(', ')}.`
+      : ' Sync NVIDIA NIM models in the dashboard, then set your client to one of those model ids.';
+    const message = `NVIDIA NIM is active, but the client requested "${targetModel}". Set the client model to an NVIDIA NIM model id; the proxy will not substitute a default model.${exampleText}`;
     console.warn(`[proxy] ${message}`);
 
     if (req.path.includes('/messages')) {
@@ -1510,23 +2000,50 @@ async function proxyRequest(req, res) {
     });
   }
 
-  if (!isCopilotProvider && !isNvidiaNimUpstream && config.model_mapping && config.model_mapping[targetModel]) {
-    targetModel = config.model_mapping[targetModel];
-    if (req.body) req.body.model = targetModel;
-    // console.log(`[proxy] Mapping: ${originalModel} → ${targetModel}`);
-  }
+  const skipModelMappingForRateLimitFallback = req.__skipModelMappingForRateLimitFallback === true;
 
-  const normalizedRemovedModel = normalizeRemovedClaudeHaikuModel(targetModel);
+  const normalizedRemovedModel = strictProviderRouting ? targetModel : normalizeRemovedClaudeHaikuModel(targetModel);
   if (normalizedRemovedModel !== targetModel) {
     targetModel = normalizedRemovedModel;
     if (req.body) req.body.model = targetModel;
+  }
+
+  if (!strictProviderRouting && isTimyProvider(baseUrl)) {
+    const normalizedTimyModel = normalizeTimyModel(targetModel);
+    if (normalizedTimyModel !== targetModel) {
+      targetModel = normalizedTimyModel;
+      if (req.body) req.body.model = normalizedTimyModel;
+    }
+
+    if (!TIMY_SUPPORTED_MODELS.includes(targetModel)) {
+      const message = getTimyUnsupportedModelMessage(targetModel);
+      console.warn(`[proxy] ${message}`);
+
+      if (req.path.includes('/messages')) {
+        return res.status(400).json({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message,
+          },
+        });
+      }
+
+      return res.status(400).json({
+        error: {
+          message,
+          type: 'invalid_request_error',
+          code: 'invalid_timy_model',
+        },
+      });
+    }
   }
 
   // ── EcomAgent early model normalisation ───────────────────────────────────
   // EcomAgent only supports opus-class models (claude-opus-4-6, claude-opus-4.6).
   // Remap req.body.model NOW so that all downstream logic (isModelUnavailable,
   // provider auto-switch, buildUpstreamRequest) already sees the correct model.
-  if (baseUrl.includes('ecom') && req.body?.model && /claude/i.test(req.body.model)) {
+  if (!strictProviderRouting && !skipModelMappingForRateLimitFallback && baseUrl.includes('ecom') && req.body?.model && /claude/i.test(req.body.model)) {
     const preEcom = req.body.model;
     req.body.model = req.body.model
       .replace(/claude-opus-4-6/g, 'claude-opus-4.6')
@@ -1577,6 +2094,28 @@ async function proxyRequest(req, res) {
     return res.json(stubData);
   }
 
+  // ── NVIDIA NIM: proactive client-side rate limiting ───────────────────────
+  // Enforce RPM / RPD limits before the upstream request to avoid hitting the
+  // NVIDIA NIM quota wall and receiving a 429. The acquire() call waits
+  // transparently when the per-minute bucket is full.
+  if (isNvidiaNimUpstream && targetModel && targetModel !== 'unknown') {
+    const limiterResult = await nvidiaNimLimiter.acquire(targetModel);
+    if (limiterResult.blocked) {
+      const { rpdUsed, rpdLimit } = nvidiaNimLimiter.stats(targetModel);
+      const msg =
+        `NVIDIA NIM daily request limit reached for model "${targetModel}" ` +
+        `(${rpdUsed}/${rpdLimit} RPD). ` +
+        `Set NVIDIA_NIM_RPD_LIMIT env var to raise this if you have a higher-tier account.`;
+      console.warn(`[proxy] ${msg}`);
+      if (req.path.includes('/messages')) {
+        return res.status(429).json({ type: 'error', error: { type: 'rate_limit_error', message: msg } });
+      }
+      return res.status(429).json({ error: { message: msg, type: 'rate_limit_error', code: 'nvidia_nim_daily_limit' } });
+    }
+    const { rpmUsed, rpmLimit, rpdUsed, rpdLimit } = nvidiaNimLimiter.stats(targetModel);
+    console.log(`[nvidia-nim-limiter] Slot acquired for "${targetModel}" — RPM: ${rpmUsed}/${rpmLimit}, RPD: ${rpdUsed}/${rpdLimit}`);
+  }
+
   try {
     const buildStart = Date.now();
     const axiosConfig = buildUpstreamRequest(req, baseUrl, apiKey);
@@ -1585,6 +2124,14 @@ async function proxyRequest(req, res) {
     const upstreamStart = Date.now();
     const upstreamRes = await axios(axiosConfig);
     timing.upstreamHeadersMs = Date.now() - upstreamStart;
+    if (isNvidiaNimUpstream) {
+      warnSlowNvidiaNimRequest({
+        phase: 'headers',
+        elapsedMs: timing.upstreamHeadersMs,
+        model: targetModel,
+        providerName,
+      });
+    }
 
     // console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
 
@@ -1603,6 +2150,7 @@ async function proxyRequest(req, res) {
     // ── Detect request type ───────────────────────────────────────────────
     const isChatCompletions = req.path.includes('/chat/completions');
     const isMessages = req.path.includes('/messages');
+    const isNativeNvidiaNimMessages = req.__nativeNvidiaNimMessages === true;
 
     // Buffer if:
     // 1. Not streaming
@@ -1623,26 +2171,45 @@ async function proxyRequest(req, res) {
     let sseBuffer = ''; // for normalizing incomplete SSE lines in streaming mode
     let promptTokens = 0;
     let completionTokens = 0;
+    let totalTokens = 0;
+    let capturedUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false };
     const captureUsage = (json) => {
-      const usage = json?.usage || json?.message?.usage || json?.choices?.[0]?.usage || null;
-      if (!usage) return;
-      promptTokens = usage.prompt_tokens || usage.input_tokens || promptTokens;
-      completionTokens = usage.completion_tokens || usage.output_tokens || completionTokens;
+      capturedUsage = mergeTokenUsage(capturedUsage, normalizeTokenUsage(json));
+      promptTokens = capturedUsage.promptTokens;
+      completionTokens = capturedUsage.completionTokens;
+      totalTokens = capturedUsage.totalTokens;
     };
     let anthropicTranslator = null;
-    if (isMessages && isStreaming) {
+    if (isMessages && isStreaming && !isNativeNvidiaNimMessages) {
       anthropicTranslator = new AnthropicSSETranslator(res, requestedModel);
       anthropicTranslator.start();
     }
+    // Buffer for NVIDIA NIM / Kimi models that embed tool calls as special tokens
+    // inside choice.delta.content instead of using the standard tool_calls array.
+    // Only activated when the upstream is NVIDIA NIM — zero effect on other providers.
+    let kimiTextBuffer = '';
 
     upstreamRes.data.on('data', (chunk) => {
       if (timing.firstChunkMs === null) {
         timing.firstChunkMs = Date.now() - startTime;
+        if (isNvidiaNimUpstream) {
+          warnSlowNvidiaNimRequest({
+            phase: 'first chunk',
+            elapsedMs: timing.firstChunkMs,
+            model: targetModel,
+            providerName,
+          });
+        }
       }
       const text = chunk.toString();
       if (shouldBuffer) rawBody += text;
 
       if (!shouldBuffer) {
+        if (isStreaming && isNativeNvidiaNimMessages) {
+          res.write(chunk);
+          return;
+        }
+
         if (isStreaming) {
           sseBuffer += text;
           const lines = sseBuffer.split('\n');
@@ -1681,14 +2248,47 @@ async function proxyRequest(req, res) {
 
                   // OpenAI-format translation
                   const choice = obj.choices?.[0];
-                  const text = choice?.delta?.content || choice?.text || '';
+                  const deltaText = choice?.delta?.content || choice?.text || '';
                   const thinking = choice?.delta?.reasoning_content || '';
                   const toolCalls = choice?.delta?.tool_calls || [];
-                  
-                  if (text || thinking) {
-                    anthropicTranslator.pushDelta(text, thinking);
+
+                  // NVIDIA NIM / Kimi: intercept tool-call special tokens that arrive
+                  // as plain content text instead of in the tool_calls delta array.
+                  if (isNvidiaNimUpstream && deltaText) {
+                    kimiTextBuffer += deltaText;
+
+                    if (kimiTextBuffer.includes('<|tool_calls_section_begin|>')) {
+                      // Hold text until the closing marker arrives
+                      if (kimiTextBuffer.includes('<|tool_calls_section_end|>')) {
+                        const parsed = parseKimiToolCallTokens(kimiTextBuffer);
+                        if (parsed && parsed.toolCalls.length > 0) {
+                          if (parsed.preSectionText) {
+                            anthropicTranslator.pushDelta(parsed.preSectionText, thinking);
+                          }
+                          for (const tc of parsed.toolCalls) {
+                            anthropicTranslator.pushToolCallDelta(tc);
+                          }
+                          if (parsed.postSectionText) {
+                            anthropicTranslator.pushDelta(parsed.postSectionText, '');
+                          }
+                        } else {
+                          // Parse failed — emit the buffer as raw text so nothing is lost
+                          anthropicTranslator.pushDelta(kimiTextBuffer, thinking);
+                        }
+                        kimiTextBuffer = '';
+                      }
+                      // else: still waiting for section_end — don't emit yet
+                    } else {
+                      // No Kimi tool tokens — safe to emit immediately
+                      anthropicTranslator.pushDelta(kimiTextBuffer, thinking);
+                      kimiTextBuffer = '';
+                    }
+                  } else {
+                    if (deltaText || thinking) {
+                      anthropicTranslator.pushDelta(deltaText, thinking);
+                    }
                   }
-                  
+
                   for (const tc of toolCalls) {
                     anthropicTranslator.pushToolCallDelta(tc);
                   }
@@ -1726,6 +2326,13 @@ async function proxyRequest(req, res) {
         ? null
         : Date.now() - startTime - timing.firstChunkMs;
 
+      // Flush any Kimi content that was held waiting for a tool section that
+      // never completed (e.g. model stopped mid-generation).
+      if (anthropicTranslator && kimiTextBuffer) {
+        anthropicTranslator.pushDelta(kimiTextBuffer, '');
+        kimiTextBuffer = '';
+      }
+
       if (anthropicTranslator) {
         anthropicTranslator.finish();
       }
@@ -1759,6 +2366,7 @@ async function proxyRequest(req, res) {
         if (isMessages) {
           try {
             const parsed = JSON.parse(rawBody);
+            captureUsage(parsed);
             if (parsed.choices && Array.isArray(parsed.choices)) {
               // console.log('[proxy] Translating non-streaming OpenAI response to Anthropic format');
               const translated = translateOpenAIToAnthropic(parsed, requestedModel);
@@ -1790,16 +2398,7 @@ async function proxyRequest(req, res) {
       try {
         if (!isStreaming) {
           const json = bufferedBody || JSON.parse(rawBody);
-          // Support multiple usage formats:
-          // 1. OpenAI: json.usage (prompt_tokens / completion_tokens)
-          // 2. Anthropic: json.message.usage (input_tokens / output_tokens)
-          // 3. Some providers: json.choices[0].usage
-          const u = json?.usage
-            || json?.message?.usage
-            || json?.choices?.[0]?.usage
-            || {};
-          promptTokens = u.prompt_tokens || u.input_tokens || promptTokens;
-          completionTokens = u.completion_tokens || u.output_tokens || completionTokens;
+          captureUsage(json);
         }
       } catch {
         // Usage parse is best-effort
@@ -1818,6 +2417,7 @@ async function proxyRequest(req, res) {
         latencyMs: Date.now() - startTime,
         promptTokens,
         completionTokens,
+        totalTokens,
         streaming: isStreaming,
         provider: providerName,
         performance: timing,
@@ -1870,6 +2470,14 @@ async function proxyRequest(req, res) {
 
   } catch (err) {
     const status = err.response?.status || 502;
+    // Capture retry-after header early — needed for NVIDIA NIM 429 backoff below.
+    const retryAfterRaw = err.response?.headers?.['retry-after'] || err.response?.headers?.['x-ratelimit-reset-requests'] || '';
+    const retryAfterSeconds = (() => {
+      const val = parseInt(retryAfterRaw, 10);
+      if (Number.isFinite(val) && val > 0) return Math.min(val, 65);
+      // retry-after can also be an HTTP-date; treat it as unknown → use default
+      return null;
+    })();
 
     // When responseType:'stream', err.response.data is a Readable stream — NOT a
     // plain object. Calling JSON.stringify on it causes "circular structure" errors.
@@ -1902,12 +2510,32 @@ async function proxyRequest(req, res) {
         message = parsed.error;
       } else if (typeof parsed.message === 'string') {
         message = parsed.message;
+      } else if (typeof parsed.title === 'string') {
+        message = typeof parsed.detail === 'string' && parsed.detail.trim()
+          ? `${parsed.title}: ${parsed.detail}`
+          : parsed.title;
       }
     } catch (e) {
       // Keep original message if it's not JSON
     }
 
     console.error(`[proxy] Upstream request failed (${status}): ${String(message).slice(0, 1200)}`);
+
+    const isNvidiaNimDictHashError =
+      isNvidiaNimUpstream &&
+      status >= 500 &&
+      /unhashable type:\s*['"]dict['"]/i.test(`${message}\n${rawUpstreamMessage}`);
+
+    if (isNvidiaNimDictHashError && !req.__nvidiaNimUnhashableRetried) {
+      if (!canRetry(req)) {
+        console.warn(`[proxy] NVIDIA NIM dict-hash retry skipped: attempt budget exhausted${attemptLabel(req)}`);
+      } else {
+        req.__nvidiaNimUnhashableRetried = true;
+        req.__nvidiaNimStripTools = true;
+        console.warn(`[proxy] NVIDIA NIM rejected a tool-preserving request with a dict-hash error; retrying once without tools${attemptLabel(req)}`);
+        return proxyRequest(req, res);
+      }
+    }
 
     // Detect Gemini function-call/response parity error — retry with stripped tool history
     const isFunctionParityError =
@@ -1970,6 +2598,11 @@ async function proxyRequest(req, res) {
     // 0. Rate Limit Failover: Switch to next API key if available
     if (status === 429) {
       const currentProvider = eligibleProviders.find(p => p.baseUrl && (baseUrl.replace(/\/+$/, '') === p.baseUrl.replace(/\/+$/, ''))) || activeProvider;
+      const currentProviderIsNvidiaNim = req.__upstreamProviderIsNvidiaNim === true ||
+        req.__startedOnNvidiaNim === true ||
+        isNvidiaNimProvider(currentProvider) ||
+        isNvidiaNimValue(providerName) ||
+        isNvidiaNimValue(baseUrl);
       if (!currentProvider?.id) {
         console.warn('[proxy] Rate limit handling skipped: no current provider context available.');
       } else {
@@ -1981,6 +2614,7 @@ async function proxyRequest(req, res) {
         if (nextKey) {
           if (!canRetry(req)) {
             console.warn(`[proxy] Rate-limit key-rotation retry skipped: attempt budget exhausted${attemptLabel(req)}`);
+            return sendAttemptBudgetExhausted(req, res);
           } else {
             const maskedNextKey = `${nextKey.slice(0, 8)}...${nextKey.slice(-4)}`;
             console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; retrying with next API key: ${maskedNextKey}${attemptLabel(req)}`);
@@ -1988,6 +2622,69 @@ async function proxyRequest(req, res) {
           }
         }
         console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; no more keys available.`);
+      }
+
+      if (req.__fixedModelRouteProviderId) {
+        console.warn(
+          `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; fixed model route "${req.__fixedModelRouteKey}" is enabled, so provider fallback is skipped.`
+        );
+      } else if (strictProviderRouting) {
+        console.warn(
+          `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; strict selected-provider routing is enabled, so provider fallback is skipped.`
+        );
+      } else if (currentProviderIsNvidiaNim) {
+        // NVIDIA NIM 429: wait for retry-after (or a short default) and retry transparently.
+        // The client never sees the error — it just experiences a brief pause.
+        if (!req.__nvidiaNimRateLimitRetried) {
+          if (!canRetry(req)) {
+            console.warn(`[proxy] NVIDIA NIM rate-limit retry skipped: attempt budget exhausted${attemptLabel(req)}`);
+          } else {
+            req.__nvidiaNimRateLimitRetried = true;
+            const waitMs = (retryAfterSeconds !== null ? retryAfterSeconds : 5) * 1000;
+            console.warn(
+              `[proxy] Rate limit (429) on NVIDIA NIM for model "${req.body?.model || targetModel}"; ` +
+              `waiting ${waitMs / 1000}s then retrying${retryAfterSeconds === null ? ' (no retry-after header, using 5s default)' : ''}${attemptLabel(req)}`
+            );
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            return proxyRequest(req, res);
+          }
+        } else {
+          console.warn(
+            `[proxy] Rate limit (429) on NVIDIA NIM; already retried once, giving up for model "${req.body?.model || targetModel}".`
+          );
+        }
+      } else {
+        if (!req.__triedProviders) req.__triedProviders = new Set();
+        if (currentProvider?.id) req.__triedProviders.add(currentProvider.id);
+
+        const currentModelForFallback = req.body?.model || targetModel;
+        const nextProvider = eligibleProviders.find((p) => {
+          const isSameProvider = currentProvider?.id && p.id === currentProvider.id;
+          return p.id &&
+            !isSameProvider &&
+            !req.__triedProviders.has(p.id) &&
+            providerCanPreserveModelForRateLimitFallback(p, currentModelForFallback);
+        });
+
+        if (nextProvider) {
+          if (!canRetry(req)) {
+            console.warn(`[proxy] Rate-limit provider fallback skipped: attempt budget exhausted${attemptLabel(req)}`);
+            return sendAttemptBudgetExhausted(req, res);
+          } else {
+            console.warn(
+              `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; ` +
+              `retrying same model "${currentModelForFallback}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
+            );
+            req.__currentProviderId = nextProvider.id;
+            req.__skipModelMappingForRateLimitFallback = true;
+            if (req.body && currentModelForFallback) req.body.model = currentModelForFallback;
+            return proxyRequest(req, res);
+          }
+        } else {
+          console.warn(
+            `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; no selected fallback provider can preserve model "${currentModelForFallback}".`
+          );
+        }
       }
     }
 
@@ -2005,7 +2702,7 @@ async function proxyRequest(req, res) {
         isNvidiaNimValue(providerName) ||
         isNvidiaNimValue(baseUrl);
 
-      const nextProvider = isNvidiaNim
+      const nextProvider = (req.__fixedModelRouteProviderId || strictProviderRouting || isNvidiaNim)
         ? null
         : eligibleProviders.find((p) => {
             const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
@@ -2050,7 +2747,9 @@ async function proxyRequest(req, res) {
     if (!res.headersSent) {
       const isUnauthorized = status === 401 || status === 403;
       const descriptiveMessage = isUnauthorized
-        ? `Upstream provider "${providerName}" returned ${status} (Unauthorized). Verify the API key in Settings. Original error: ${message}`
+        ? (isTimyProvider(baseUrl)
+          ? `Upstream provider "${providerName}" returned ${status}. Original error: ${message}`
+          : `Upstream provider "${providerName}" returned ${status} (Unauthorized). Verify the API key in Settings. Original error: ${message}`)
         : message;
 
       if (req.path.includes('/messages')) {

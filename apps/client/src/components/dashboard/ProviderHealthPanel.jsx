@@ -29,7 +29,8 @@ const STATUS_CONFIG = {
   },
   unknown: {
     icon: HelpCircle,
-    label: 'Unknown',
+    label: 'Not checked',
+    tooltip: 'Live health checks are not performed. Status reflects configuration only.',
     textColor: '#94a3b8',
     dotColor: '#64748b',
     bgColor: 'rgba(100,116,139,0.08)',
@@ -52,10 +53,6 @@ const ProviderHealthPanel = ({
   isRefreshing = false,
   onRefresh,
 }) => {
-  const provider = providers[0] || null;
-  const cfg = provider ? (STATUS_CONFIG[provider.status] || STATUS_CONFIG.unknown) : STATUS_CONFIG.unknown;
-  const Icon = cfg.icon;
-
   if (loading) {
     return (
       <div className="shrink-0 flex items-center rounded-2xl overflow-hidden px-4 py-2 gap-3"
@@ -66,7 +63,7 @@ const ProviderHealthPanel = ({
       >
         <Globe size={13} className="text-[--color-text-tertiary] shrink-0" />
         <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[--color-text-tertiary] whitespace-nowrap">
-          Active Provider
+          Providers
         </span>
         <SkeletonRow />
       </div>
@@ -78,94 +75,76 @@ const ProviderHealthPanel = ({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, delay: 0.05 }}
-      className="shrink-0 flex items-center rounded-2xl overflow-hidden px-4 py-2 gap-3"
+      className="shrink-0 flex items-center rounded-2xl overflow-hidden px-4 py-2 gap-3 flex-wrap"
       style={{
         background: 'var(--color-bg-panel)',
-        border: `1px solid ${cfg.borderColor}`,
-        boxShadow: provider?.status === 'online'
-          ? '0 0 20px rgba(16,185,129,0.05)'
-          : provider?.status === 'error' || provider?.status === 'unauthorized'
-          ? '0 0 20px rgba(251,113,133,0.05)'
-          : 'none',
+        border: '1px solid var(--color-border-strong)',
       }}
     >
-      {/* Globe icon */}
-      <Globe size={13} style={{ color: cfg.textColor }} className="shrink-0" />
+      <Globe size={13} style={{ color: 'var(--color-text-tertiary)' }} className="shrink-0" />
 
-      {/* Label */}
       <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[--color-text-tertiary] whitespace-nowrap">
-        Active Provider
+        Providers
       </span>
 
-      {/* Divider */}
-      <div className="h-4 w-px bg-white/8 shrink-0" />
+      <div className="h-4 w-px shrink-0" style={{ background: 'rgba(255,255,255,0.08)' }} />
 
-      {/* Provider name + status badge */}
-      {provider ? (
-        <div className="flex items-center gap-2">
-          {/* Animated pulse dot */}
-          <span className="relative flex h-2 w-2 shrink-0">
-            {provider.status === 'online' ? (
-              <span
-                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                style={{ background: cfg.dotColor }}
-              />
-            ) : null}
-            <span
-              className="relative inline-flex rounded-full h-2 w-2 shrink-0"
-              style={{ background: cfg.dotColor }}
-            />
-          </span>
-
-          <span className="text-xs font-bold text-white truncate max-w-[120px]">
-            {provider.name}
-          </span>
-
-          <span
-            className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0"
-            style={{
-              background: cfg.bgColor,
-              color: cfg.textColor,
-              border: `1px solid ${cfg.borderColor}`,
-            }}
-          >
-            {cfg.label}
-          </span>
-
-          {provider.latencyMs != null && provider.status === 'online' && (
-            <span className="text-[10px] font-mono text-[--color-text-tertiary] shrink-0">
-              {provider.latencyMs}ms
-            </span>
-          )}
-
-          {provider.hasApiKey === false && provider.status !== 'online' && (
-            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0"
-              style={{
-                background: 'rgba(251,191,36,0.08)',
-                color: '#fbbf24',
-                border: '1px solid rgba(251,191,36,0.15)',
-              }}
-              title="Add API key in Settings to enable health checks"
-            >
-              No Key
-            </span>
-          )}
-        </div>
-      ) : (
+      {providers.length === 0 ? (
         <div className="flex items-center gap-2 text-[--color-text-tertiary]">
           <HelpCircle size={12} />
-          <span className="text-xs font-medium">No active provider</span>
+          <span className="text-xs font-medium">No providers configured</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 flex-wrap">
+          {providers.map((p) => {
+            const cfg = STATUS_CONFIG[p.status] || STATUS_CONFIG.unknown;
+            return (
+              <div key={p.name} className="flex items-center gap-1.5" title={cfg.tooltip}>
+                <span className="relative flex h-2 w-2 shrink-0">
+                  {p.status === 'online' && (
+                    <span
+                      className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                      style={{ background: cfg.dotColor }}
+                    />
+                  )}
+                  <span
+                    className="relative inline-flex rounded-full h-2 w-2"
+                    style={{ background: cfg.dotColor }}
+                  />
+                </span>
+                <span className="text-xs font-bold text-white truncate max-w-[100px]">{p.name}</span>
+                <span
+                  className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0"
+                  style={{ background: cfg.bgColor, color: cfg.textColor, border: `1px solid ${cfg.borderColor}` }}
+                >
+                  {cfg.label}
+                </span>
+                {p.hasApiKey === false && (
+                  <span
+                    className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider shrink-0"
+                    style={{ background: 'rgba(251,191,36,0.08)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.15)' }}
+                    title="Add API key in Settings"
+                  >
+                    No Key
+                  </span>
+                )}
+                {p.latencyMs != null && p.status === 'online' && (
+                  <span className="text-[10px] font-mono text-[--color-text-tertiary] shrink-0">
+                    {p.latencyMs}ms
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Refresh button */}
       {onRefresh && (
         <button
           onClick={onRefresh}
-          title="Refresh provider health"
+          title="Refresh provider list"
           className="shrink-0 p-1.5 rounded-lg text-[--color-text-tertiary] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
         >
           {isRefreshing ? (
