@@ -329,28 +329,38 @@ const Models = ({ user }) => {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-8 pb-10">
-            {visibleProviderGroups.map((group) => (
-              <section key={group.key} className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.18em] border ${group.color}`}>
-                      {group.label}
+          <div className="pb-10">
+            {selectedProvider === 'all' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {visibleProviderGroups.flatMap(group => group.models).map((model, index) => (
+                  <ModelCard key={model.id} model={model} index={index} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-8">
+                {visibleProviderGroups.map((group) => (
+                  <section key={group.key} className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.18em] border ${group.color}`}>
+                          {group.label}
+                        </div>
+                        <div className="h-px w-10 bg-slate-800" />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 shrink-0">
+                        {group.models.length} {group.models.length === 1 ? 'Model' : 'Models'}
+                      </span>
                     </div>
-                    <div className="h-px w-10 bg-slate-800" />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 shrink-0">
-                    {group.models.length} {group.models.length === 1 ? 'Model' : 'Models'}
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {group.models.map((model, index) => (
-                    <ModelCard key={model.id} model={model} index={index} />
-                  ))}
-                </div>
-              </section>
-            ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {group.models.map((model, index) => (
+                        <ModelCard key={model.id} model={model} index={index} />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

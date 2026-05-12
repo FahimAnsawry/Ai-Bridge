@@ -181,6 +181,15 @@ function sanitizeNvidiaNimRequestBody(bodyData, options = {}) {
     'user',
   ].forEach(copyScalar);
 
+  // Inject chat_template_kwargs for Kimi K2 models — required for extended thinking/tool use.
+  // Pass through any client-provided value; otherwise inject the default for kimi models.
+  const isKimiModel = typeof bodyData.model === 'string' && /kimi/i.test(bodyData.model);
+  if (bodyData.chat_template_kwargs !== undefined) {
+    sanitized.chat_template_kwargs = bodyData.chat_template_kwargs;
+  } else if (isKimiModel) {
+    sanitized.chat_template_kwargs = { thinking: true };
+  }
+
   const stop = sanitizeStop(bodyData.stop);
   if (stop !== undefined) sanitized.stop = stop;
 

@@ -42,6 +42,20 @@ function createWebServer(options = {}) {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+  app.get('/health', async (req, res) => {
+    const state = await runtime.getState();
+    res.json({
+      ok: true,
+      dashboardApi: true,
+      proxy: {
+        running: state.running,
+        endpoint: state.endpoint,
+        boundPort: state.boundPort,
+        lastError: state.lastError || '',
+      },
+    });
+  });
+
   // Passport init
   app.use(passport.initialize());
   app.use(passport.session());

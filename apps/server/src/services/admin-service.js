@@ -3,6 +3,15 @@ const { getLogs, getLatestLog, clearLogs, getStats } = require('../middlewares/l
 const { mongoose, User, ModelCatalog, RequestLog, Provider } = require('../config/db');
 const { isNvidiaNimProvider } = require('../utils/provider-detection');
 
+function isFreeModelProvider(provider) {
+  const baseUrl = provider?.baseUrl;
+  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('freemodel.dev');
+}
+
+function isFreeModelPlaceholderApiKey(apiKey) {
+  return String(apiKey || '').trim().toLowerCase() === 'freemodel';
+}
+
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
 }
@@ -119,6 +128,13 @@ function createAdminService(runtime) {
       const hasKey = Array.isArray(provider.apiKeys)
         ? provider.apiKeys.some((k) => k && k.trim().length > 0)
         : Boolean(provider.apiKey);
+      const isFreeModel = isFreeModelProvider(provider);
+      const hasUsableKey = isFreeModel
+        ? (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0
+          ? provider.apiKeys.some((k) => k && !isFreeModelPlaceholderApiKey(k))
+          : Boolean(provider.apiKey && !isFreeModelPlaceholderApiKey(provider.apiKey)))
+        : hasKey;
+      const isConfigured = Boolean(provider.baseUrl) && hasUsableKey;
 
       return {
         id: provider.id,
@@ -126,9 +142,9 @@ function createAdminService(runtime) {
         isActive: provider.id === activeProviderId,
         isSelected: provider.isActive !== false,
         status: 'unknown',
-        message: !provider.baseUrl ? 'No base URL configured' : (!hasKey ? 'No API key configured' : 'Provider configured'),
+        message: !provider.baseUrl ? 'No base URL configured' : (!isConfigured ? 'No API key configured' : 'Provider configured'),
         latencyMs: null,
-        hasApiKey: hasKey,
+        hasApiKey: hasUsableKey,
       };
     });
 

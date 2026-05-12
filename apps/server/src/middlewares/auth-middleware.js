@@ -38,9 +38,22 @@ function requireAuth(req, res, next) {
 async function requireAccessKey(req, res, next) {
   const authStart = Date.now();
   const apiKey = req.headers['x-api-key'] || req.query['key'] || (req.headers.authorization || '').replace('Bearer ', '');
+  const sendAccessKeyError = (status, message) => {
+    if (req.path.includes('/messages')) {
+      return res.status(status).json({
+        type: 'error',
+        error: {
+          type: status === 401 ? 'authentication_error' : 'api_error',
+          message,
+        },
+        usage: { input_tokens: 0, output_tokens: 0 },
+      });
+    }
+    return res.status(status).json({ error: message });
+  };
   
   if (!apiKey) {
-    return res.status(401).json({ error: 'API key is missing.' });
+    return sendAccessKeyError(401, 'API key is missing.');
   }
 
   // If DB is down, allow "local-my-secret-key" as guest
@@ -49,7 +62,7 @@ async function requireAccessKey(req, res, next) {
       req.user = MOCK_GUEST_USER;
       return next();
     }
-    return res.status(401).json({ error: 'Invalid API key (DB is down, use default key).' });
+    return sendAccessKeyError(401, 'Invalid API key (DB is down, use default key).');
   }
 
   try {
@@ -77,10 +90,10 @@ async function requireAccessKey(req, res, next) {
     }
     
     // We should probably optimize this later if accessKey is not saved in clear text.
-    return res.status(401).json({ error: 'Unauthorized: Invalid Bridge API key.' });
+    return sendAccessKeyError(401, 'Unauthorized: Invalid Bridge API key.');
   } catch (error) {
     console.error('API key validation error:', error);
-    return res.status(500).json({ error: 'Internal Server Error validating API key.' });
+    return sendAccessKeyError(500, 'Internal Server Error validating API key.');
   }
 }
 

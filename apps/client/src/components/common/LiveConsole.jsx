@@ -13,7 +13,7 @@ const LiveConsole = ({ logs, autoScroll = true }) => {
   return (
     <div 
       ref={scrollRef}
-      className="font-mono text-[12px] p-4 overflow-y-auto max-h-[600px] rounded-[--radius-lg] relative"
+      className="h-full min-h-0 font-mono text-[12px] p-4 overflow-y-auto rounded-[--radius-lg] relative"
       style={{
         background: 'var(--color-bg-panel)',
         border: '1px solid var(--color-glass-border)',

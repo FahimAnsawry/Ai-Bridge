@@ -46,7 +46,7 @@ const LogTable = ({ logs = [], loading = false }) => {
   }
 
   return (
-    <div className="overflow-x-auto overflow-y-auto max-h-[600px]" ref={scrollRef}>
+    <div className="h-full min-h-0 overflow-x-auto overflow-y-auto" ref={scrollRef}>
       <table className="w-full border-collapse">
         <thead>
           <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>

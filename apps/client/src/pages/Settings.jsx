@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route } from 'lucide-react';
+import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown } from 'lucide-react';
 import {
   fetchConfig,
   saveConfig,
@@ -19,19 +19,21 @@ const DEFAULT_MODELS = [
   { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex' },
   { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
   { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
-  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+  { id: 'claude-opus-4.7', name: 'Claude Opus 4.7' },
   { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4-6' },
   { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
   { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
   { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen3.5 397B A17B' },
   { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
   { id: 'z-ai/glm-5.1', name: 'GLM 5.1' },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+
   { id: 'glm-5.1', name: 'GLM 5.1' },
   { id: 'grok-code-fast-1', name: 'Grok Code Fast 1' },
   { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
-  { id: 'qwen-3.6-plus', name: 'Qwen 3.6 Plus' },
+  { id: 'qwen3.5-397b-a17b', name: 'qwen3.5-397b-a17b' },
   { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
@@ -360,15 +362,65 @@ const Settings = ({ user: initialUser }) => {
   const [user, setUser] = useState(initialUser);
   const [expandedIds, setExpandedIds] = useState({});
   const [editingProviderId, setEditingProviderId] = useState(null);
+  const [activeRouteProviderId, setActiveRouteProviderId] = useState(null);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const [isAddRouteModalOpen, setIsAddRouteModalOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const modelDropdownRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState({ state: 'idle', message: '' });
   const providerListRef = useRef(null);
   const [providerScrollState, setProviderScrollState] = useState({ top: false, bottom: false });
   const { showToast } = useToast();
+
+  const isFreeModelProviderRecord = (provider) => {
+    const value = `${provider?.id || ''} ${provider?.name || ''} ${provider?.baseUrl || ''}`.toLowerCase();
+    return value.includes('freemodel') || value.includes('freemodel.dev');
+  };
+
+  const isFreeModelPlaceholderKey = (key) => String(key || '').trim().toLowerCase() === 'freemodel';
+
+  const getProviderKeys = (provider) => {
+    if (Array.isArray(provider?.apiKeys) && provider.apiKeys.length > 0) return provider.apiKeys;
+    return provider?.apiKey ? [provider.apiKey] : [];
+  };
+
+  const validateProvidersForSave = (providers) => {
+    const freeModel = (providers || []).find(isFreeModelProviderRecord);
+    if (!freeModel) return '';
+
+    const keys = getProviderKeys(freeModel).map((key) => String(key || '').trim()).filter(Boolean);
+    if (keys.length === 0) {
+      return 'FreeModel needs a real API key before requests can be sent. Get one at freemodel.dev → API Keys.';
+    }
+    if (keys.some(isFreeModelPlaceholderKey)) {
+      return 'FreeModel API key cannot be the placeholder "freemodel". Paste a real key.';
+    }
+    return '';
+  };
+
+  const persistConfigChange = async (updates, options = {}) => {
+    const providersToValidate = updates.providers || (updates.replace_providers ? [] : null);
+    const validationError = providersToValidate ? validateProvidersForSave(providersToValidate) : '';
+    if (validationError) {
+      setSaveStatus({ state: 'error', message: validationError });
+      showToast(validationError, 'error');
+      return false;
+    }
+
+    setSaveStatus({ state: 'saving', message: 'Saving changes...' });
+    try {
+      await saveConfig(updates);
+      setSaveStatus({ state: 'saved', message: 'Saved' });
+      if (options.successMessage) showToast(options.successMessage, 'success');
+      return true;
+    } catch (err) {
+      const message = err.message || 'Failed to save settings.';
+      setSaveStatus({ state: 'error', message });
+      showToast(message, 'error');
+      return false;
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -436,15 +488,13 @@ const Settings = ({ user: initialUser }) => {
   const handleSave = async (e) => {
     e.preventDefault(); setSaving(true);
     try {
-      await saveConfig(form);
-      showToast('Settings saved.', 'success');
+      await persistConfigChange(form, { successMessage: 'Settings saved.' });
     } catch (err) { showToast(err.message, 'error'); }
     finally { setSaving(false); }
   };
 
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [newProviderForm, setNewProviderForm] = React.useState({ name: '', baseUrl: '', apiKey: '' });
-  const [newRouteForm, setNewRouteForm] = React.useState({ model: '', providerId: '' });
 
   const normalizeBaseUrl = (value) => String(value || '').replace(/\/+$/, '');
   const getModelRouting = (routing = form.model_routing) => (
@@ -452,32 +502,96 @@ const Settings = ({ user: initialUser }) => {
   );
   // All configured providers are available for model routes
   const routeProviders = form.providers;
-  const getProviderForRouteTarget = (target) => routeProviders.find(
-    (provider) => provider.id === target || (provider.baseUrl && normalizeBaseUrl(provider.baseUrl) === normalizeBaseUrl(target))
-  );
+  const getRouteProviders = (routeValue) => {
+    if (typeof routeValue === 'string') {
+      const target = routeValue.trim();
+      return target ? [{ target, priority: 1 }] : [];
+    }
+
+    if (!routeValue || typeof routeValue !== 'object' || !Array.isArray(routeValue.providers)) return [];
+
+    return routeValue.providers
+      .map((entry, index) => {
+        if (typeof entry === 'string') {
+          const target = entry.trim();
+          return target ? { target, priority: index + 1, index } : null;
+        }
+
+        if (!entry || typeof entry !== 'object') return null;
+        const target = String(entry.target || entry.providerId || entry.baseUrl || '').trim();
+        if (!target) return null;
+        const parsedPriority = Number(entry.priority);
+        return {
+          target,
+          priority: Number.isFinite(parsedPriority) && parsedPriority > 0 ? parsedPriority : index + 1,
+          index,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.priority - b.priority || a.index - b.index)
+      .map(({ target }, index) => ({ target, priority: index + 1 }));
+  };
+  const routeTargetsForValue = (routeValue) => getRouteProviders(routeValue).map((entry) => entry.target);
+  const serializeRouteProviders = (providers) => {
+    const seen = new Set();
+    const clean = (providers || [])
+      .map((entry) => String(entry.target || '').trim())
+      .filter((target) => {
+        if (!target || seen.has(target)) return false;
+        seen.add(target);
+        return true;
+      });
+
+    if (clean.length === 0) return null;
+    if (clean.length === 1) return clean[0];
+    return { providers: clean.map((target, index) => ({ target, priority: index + 1 })) };
+  };
+  const routeIncludesProvider = (routeValue, providerId) => routeTargetsForValue(routeValue).includes(providerId);
+  const getProviderForRouteTarget = (target) => {
+    const found = routeProviders.find(
+      (provider) => provider.id === target || (provider.baseUrl && normalizeBaseUrl(provider.baseUrl) === normalizeBaseUrl(target)) || provider.name === target
+    );
+    if (found) return found;
+    return { id: target, name: target, baseUrl: '', apiKey: '', isActive: false };
+  };
   const saveModelRouting = (routing) => {
-    const cleanRouting = Object.entries(routing).reduce((acc, [model, providerId]) => {
+    const cleanRouting = Object.entries(routing).reduce((acc, [model, routeValue]) => {
       const key = String(model || '').trim();
-      const target = String(providerId || '').trim();
-      if (key && target) acc[key] = target;
+      const route = serializeRouteProviders(getRouteProviders(routeValue));
+      if (key && route) acc[key] = route;
       return acc;
     }, {});
 
     setForm(prev => ({ ...prev, model_routing: cleanRouting }));
-    saveConfig({ model_routing: cleanRouting }).catch(err => showToast(err.message, 'error'));
-  };
-  const addModelRoute = () => {
-    const model = newRouteForm.model.trim();
-    const providerId = newRouteForm.providerId || routeProviders[0]?.id || '';
-    if (!model || !providerId) {
-      showToast('Model and provider are required.', 'error');
-      return;
-    }
-    saveModelRouting({ ...getModelRouting(), [model]: providerId });
-    setNewRouteForm({ model: '', providerId: '' });
+    void persistConfigChange({ model_routing: cleanRouting });
   };
   const updateModelRouteProvider = (model, providerId) => {
     saveModelRouting({ ...getModelRouting(), [model]: providerId });
+  };
+  const updateModelRouteProviders = (model, providers) => {
+    const route = serializeRouteProviders(providers);
+    if (!route) return removeModelRoute(model);
+    saveModelRouting({ ...getModelRouting(), [model]: route });
+  };
+  const addFallbackProvider = (model, providerId) => {
+    const providers = getRouteProviders(getModelRouting()[model]);
+    if (providers.some((entry) => entry.target === providerId)) {
+      showToast('That provider is already in this route.', 'error');
+      return;
+    }
+    updateModelRouteProviders(model, [...providers, { target: providerId }]);
+  };
+  const removeRouteProvider = (model, target) => {
+    updateModelRouteProviders(model, getRouteProviders(getModelRouting()[model]).filter((entry) => entry.target !== target));
+  };
+  const moveRouteProvider = (model, target, direction) => {
+    const providers = getRouteProviders(getModelRouting()[model]);
+    const index = providers.findIndex((entry) => entry.target === target);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= providers.length) return;
+    const next = [...providers];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    updateModelRouteProviders(model, next);
   };
   const updateModelRouteKey = (oldModel, nextModel) => {
     const model = nextModel.trim();
@@ -499,17 +613,18 @@ const Settings = ({ user: initialUser }) => {
     saveModelRouting(nextRouting);
   };
 
-  const handleAddProvider = () => {
+  const handleAddProvider = async () => {
     if (!newProviderForm.name || !newProviderForm.baseUrl || !newProviderForm.apiKey) {
       showToast('All fields are required.', 'error');
       return;
     }
     const id = uid();
     // New providers are created with isActive: true so they're immediately available
-    const newP = { id, ...newProviderForm, isActive: true };
+    const newP = { id, ...newProviderForm, apiKeys: [newProviderForm.apiKey], isActive: true };
     const next = { ...form, providers: [...form.providers, newP] };
+    const saved = await persistConfigChange({ providers: next.providers }, { successMessage: 'Provider saved.' });
+    if (!saved) return;
     setForm(next);
-    saveConfig({ providers: next.providers });
     setExpandedIds(prev => ({ ...prev, [id]: true }));
     setNewProviderForm({ name: '', baseUrl: '', apiKey: '' });
     setIsAddModalOpen(false);
@@ -518,61 +633,50 @@ const Settings = ({ user: initialUser }) => {
   const toggleExpand = (id) => setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
 
   const updateProvider = (id, field, value) => {
-    setForm(prev => {
-      const next = {
-        ...prev, providers: prev.providers.map(p => {
-          if (p.id !== id) return p;
-          const updated = { ...p, [field]: value };
-          // If editing the single apiKey, keep apiKeys synced for now (legacy compat)
-          if (field === 'apiKey' && (!p.apiKeys || p.apiKeys.length <= 1)) {
-            updated.apiKeys = [value];
-          }
-          return updated;
-        })
-      };
-      saveConfig({ providers: next.providers });
-      return next;
+    const providers = form.providers.map(p => {
+      if (p.id !== id) return p;
+      const updated = { ...p, [field]: value };
+      if (field === 'apiKey' && (!p.apiKeys || p.apiKeys.length <= 1)) {
+        updated.apiKeys = [value];
+      }
+      return updated;
     });
+    setForm(prev => ({ ...prev, providers }));
+    void persistConfigChange({ providers });
   };
 
   const addProviderApiKey = (id, key) => {
     if (!key) return;
-    setForm(prev => {
-      const next = {
-        ...prev, providers: prev.providers.map(p => {
-          if (p.id !== id) return p;
-          const apiKeys = Array.isArray(p.apiKeys) ? [...p.apiKeys] : (p.apiKey ? [p.apiKey] : []);
-          if (apiKeys.includes(key)) return p;
-          const newKeys = [...apiKeys, key];
-          return { ...p, apiKeys: newKeys, apiKey: p.apiKey || key };
-        })
-      };
-      saveConfig({ providers: next.providers });
-      return next;
+    const provider = form.providers.find(p => p.id === id);
+    if (provider && isFreeModelProviderRecord(provider) && isFreeModelPlaceholderKey(key)) {
+      showToast('FreeModel API key cannot be the placeholder "freemodel". Paste a real key.', 'error');
+      return;
+    }
+    const providers = form.providers.map(p => {
+      if (p.id !== id) return p;
+      const apiKeys = Array.isArray(p.apiKeys) ? [...p.apiKeys] : (p.apiKey ? [p.apiKey] : []);
+      if (apiKeys.includes(key)) return p;
+      const newKeys = [...apiKeys, key];
+      return { ...p, apiKeys: newKeys, apiKey: p.apiKey || key };
     });
+    setForm(prev => ({ ...prev, providers }));
+    void persistConfigChange({ providers }, { successMessage: 'Provider key saved.' });
   };
 
   const removeProviderApiKey = (id, index) => {
-    setForm(prev => {
-      const next = {
-        ...prev, providers: prev.providers.map(p => {
-          if (p.id !== id) return p;
-          const apiKeys = Array.isArray(p.apiKeys) ? p.apiKeys.filter((_, i) => i !== index) : [];
-          return { ...p, apiKeys, apiKey: apiKeys[0] || '' };
-        })
-      };
-      saveConfig({ providers: next.providers });
-      return next;
+    const providers = form.providers.map(p => {
+      if (p.id !== id) return p;
+      const apiKeys = Array.isArray(p.apiKeys) ? p.apiKeys.filter((_, i) => i !== index) : [];
+      return { ...p, apiKeys, apiKey: apiKeys[0] || '' };
     });
+    setForm(prev => ({ ...prev, providers }));
+    void persistConfigChange({ providers }, { successMessage: 'Provider key removed.' });
   };
 
   const removeProvider = (id) => {
-    setForm(prev => {
-      const providers = prev.providers.filter(p => p.id !== id);
-      const next = { ...prev, providers };
-      saveConfig({ providers: next.providers, replace_providers: true });
-      return next;
-    });
+    const providers = form.providers.filter(p => p.id !== id);
+    setForm(prev => ({ ...prev, providers }));
+    void persistConfigChange({ providers, replace_providers: true }, { successMessage: 'Provider removed.' });
   };
 
   const ensureCopilotProvider = async () => {
@@ -592,7 +696,7 @@ const Settings = ({ user: initialUser }) => {
     const existingProviders = (form.providers || []).filter(p => p.id !== 'copilot');
     const next = { ...form, providers: [...existingProviders, copilotProvider] };
     try {
-      await saveConfig({ providers: next.providers });
+      await persistConfigChange({ providers: next.providers }, { successMessage: 'GitHub Copilot provider saved.' });
       setForm(next);
     } catch (err) {
       showToast(err.message, 'error');
@@ -719,15 +823,32 @@ const Settings = ({ user: initialUser }) => {
   if (loading) return <div className="text-center py-20 text-slate-500">Loading Configuration...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto h-full flex flex-col py-6 lg:py-8 px-6 lg:px-10 space-y-6 overflow-hidden">
+    <div className="max-w-7xl mx-auto h-[calc(100vh-100px)] flex flex-col py-6 lg:py-8 px-6 lg:px-10 space-y-6 overflow-hidden">
       <header className="shrink-0 space-y-2 pb-2 border-b border-slate-800/50">
-        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text text-neon-gradient tracking-tighter">System Settings</h1>
-        <p className="text-slate-400 text-sm font-medium">Configure your gateway, providers, and security.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text text-neon-gradient tracking-tighter">System Settings</h1>
+            <p className="text-slate-400 text-sm font-medium">Configure your gateway, providers, and security.</p>
+          </div>
+          {saveStatus.state !== 'idle' && (
+            <div
+              className={`rounded-xl border px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] ${
+                saveStatus.state === 'error'
+                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                  : saveStatus.state === 'saving'
+                    ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              }`}
+            >
+              {saveStatus.message}
+            </div>
+          )}
+        </div>
       </header>
 
-      <form onSubmit={handleSave} className="flex-1 min-h-[550px] flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden pb-4 pt-2">
+      <form onSubmit={handleSave} className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden pb-4 pt-2">
         <div className="lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
-          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 shadow-panel">
+          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 shadow-panel overflow-hidden">
             <div className="flex items-center justify-between mb-5 shrink-0">
               <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
                 <Globe className="text-indigo-400 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]" size={20} />
@@ -773,8 +894,8 @@ const Settings = ({ user: initialUser }) => {
           </Card>
         </div>
 
-        <div className="lg:col-span-6 flex flex-col space-y-6 overflow-hidden">
-          <Card className="flex-1 flex flex-col min-h-0 space-y-0 p-5 lg:p-6 shadow-panel gap-4">
+        <div className="lg:col-span-6 flex flex-col space-y-6 overflow-hidden min-h-0">
+          <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-5 lg:p-6 shadow-panel overflow-hidden">
             <div className="flex items-center justify-between gap-3 shrink-0">
               <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
                 <Route className="text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" size={20} />
@@ -782,55 +903,50 @@ const Settings = ({ user: initialUser }) => {
               </h2>
               <div className="flex items-center gap-3">
                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-500 bg-cyan-500/10 px-2.5 py-1 rounded-full border border-cyan-500/20 shadow-[0_0_10px_-2px_rgba(34,211,238,0.2)]">
-                  {Object.keys(getModelRouting()).length} Active
+                  {Object.keys(getModelRouting()).length} Active Routes
                 </span>
-                <button type="button" onClick={() => setIsAddRouteModalOpen(true)} className="px-4 py-1.5 bg-cyan-500/10 text-cyan-400 text-[10px] font-bold rounded-full hover:bg-cyan-500/20 hover:shadow-[0_0_15px_-3px_rgba(34,211,238,0.3)] transition-all uppercase tracking-widest cursor-pointer border border-cyan-500/20">
-                  <Plus size={12} className="inline mr-1" /> Add
-                </button>
               </div>
             </div>
 
             <div className="space-y-4 overflow-hidden flex-1 min-h-0 flex flex-col pt-4 border-t border-slate-800/50 mt-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 overflow-y-auto pr-1 custom-scrollbar flex-1 min-h-[100px] content-start">
-                    {Object.entries(getModelRouting()).length === 0 ? (
+                  <div className="relative flex-1 min-h-0">
+                    <div className="absolute inset-0 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-4 pr-1 custom-scrollbar content-start pb-4">
+                    {routeProviders.length === 0 ? (
                       <div className="col-span-full rounded-xl border border-dashed border-slate-800/50 bg-slate-950/40 px-4 py-8 text-center text-slate-600">
-                        <p className="text-xs font-medium">No routing rules configured</p>
+                        <p className="text-xs font-medium">No providers configured</p>
                       </div>
                     ) : (
-                      Object.entries(getModelRouting()).map(([model, providerTarget]) => {
-                        const routedProvider = getProviderForRouteTarget(providerTarget);
-                        const selectValue = routedProvider?.id || providerTarget;
+                      routeProviders.map((provider) => {
+                        const routedCount = Object.values(getModelRouting()).filter(routeValue => routeIncludesProvider(routeValue, provider.id)).length;
 
                         return (
-                          <div key={model} className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-cyan-500/50 hover:shadow-[0_0_20px_-5px_rgba(34,211,238,0.25)] group relative overflow-hidden flex flex-col gap-3">
+                          <div
+                            key={provider.id}
+                            onClick={() => setActiveRouteProviderId(provider.id)}
+                            className="p-5 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-cyan-500/50 hover:shadow-[0_0_20px_-5px_rgba(34,211,238,0.25)] group cursor-pointer flex flex-col gap-4 min-h-[120px] justify-between relative overflow-hidden"
+                          >
                             <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none"></div>
-                            <input
-                              defaultValue={model}
-                              onBlur={(e) => {
-                                const nextModel = updateModelRouteKey(model, e.target.value);
-                                e.target.value = nextModel;
-                              }}
-                              className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] font-mono text-cyan-100 focus:border-cyan-500/50 focus:outline-none relative z-10"
-                              placeholder="model or prefix"
-                            />
-                            <div className="flex gap-2 relative z-10">
-                              <div className="min-w-0 flex-1 bg-slate-950/40 border border-slate-800/50 rounded-lg px-3 py-2 text-[11px] text-slate-400 font-mono flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></span>
-                                {routedProvider?.name || providerTarget}
+
+                            <div className="relative z-10 flex items-start justify-between gap-3">
+                              <div className="flex flex-col gap-1.5 min-w-0">
+                                <span className="font-display font-bold text-white tracking-tight text-base truncate">{provider.name || provider.id}</span>
+                                <span className="text-[11px] text-slate-400 font-mono truncate">{provider.baseUrl || 'No URL'}</span>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => removeModelRoute(model)}
-                                className="shrink-0 p-2 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 cursor-pointer transition-colors"
-                                title="Remove route"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                            </div>
+
+                            <div className="relative z-10 flex items-center justify-between mt-auto pt-3 border-t border-slate-800/50">
+                              <div className="flex items-center gap-2">
+                                <Route size={12} className="text-cyan-500" />
+                                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-400">
+                                  {routedCount} Models Routed
+                                </span>
+                              </div>
                             </div>
                           </div>
                         );
                       })
                     )}
+                    </div>
                   </div>
 
                   </div>
@@ -914,87 +1030,179 @@ const Settings = ({ user: initialUser }) => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isAddRouteModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-sm glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel overflow-visible">
-              <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Add Model Route</h2>
-              <div className="space-y-4 overflow-visible">
-                <div className="relative" ref={modelDropdownRef}>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Select Model</label>
-                  <input
-                    type="text"
-                    value={isModelDropdownOpen ? modelSearchQuery : (newRouteForm.model || '')}
-                    onChange={(e) => {
-                      setModelSearchQuery(e.target.value);
-                      if (!isModelDropdownOpen) setIsModelDropdownOpen(true);
-                    }}
-                    onFocus={() => {
-                      setIsModelDropdownOpen(true);
-                      setModelSearchQuery('');
-                    }}
-                    placeholder={newRouteForm.model || "Select or search a model..."}
-                    className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono placeholder:text-slate-500"
-                  />
-                  <div className="absolute right-3 top-[34px] pointer-events-none text-slate-500">
-                    <ChevronDown size={14} />
+        {activeRouteProviderId && (() => {
+          const provider = routeProviders.find((p) => p.id === activeRouteProviderId);
+          if (!provider) return null;
+
+          const providerRoutes = Object.entries(getModelRouting()).filter(([_, routeValue]) => routeIncludesProvider(routeValue, provider.id));
+
+          return (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-lg glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel max-h-[90vh] flex flex-col">
+                <div className="flex items-center justify-between shrink-0">
+                  <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display flex items-center gap-2">
+                    <Route size={20} className="text-cyan-400" />
+                    Routes for {provider.name || provider.id}
+                  </h2>
+                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className="text-slate-400 hover:text-white cursor-pointer"><XCircle size={20}/></button>
+                </div>
+
+                <div className="space-y-4 overflow-visible flex-1 min-h-0 flex flex-col">
+                  {/* Add Model Dropdown */}
+                  <div className="relative z-50 shrink-0" ref={modelDropdownRef}>
+                    <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Add Model Route</label>
+                    <input
+                      type="text"
+                      value={isModelDropdownOpen ? modelSearchQuery : ''}
+                      onChange={(e) => {
+                        setModelSearchQuery(e.target.value);
+                        if (!isModelDropdownOpen) setIsModelDropdownOpen(true);
+                      }}
+                      onFocus={() => {
+                        setIsModelDropdownOpen(true);
+                        setModelSearchQuery('');
+                      }}
+                      placeholder="Select or search a model..."
+                      className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono placeholder:text-slate-500"
+                    />
+                    <div className="absolute right-3 top-[34px] pointer-events-none text-slate-500">
+                      <ChevronDown size={14} />
+                    </div>
+                    <AnimatePresence>
+                      {isModelDropdownOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -5 }}
+                          className="absolute z-[100] w-full mt-1 bg-slate-900/95 backdrop-blur-md border border-cyan-500/30 rounded-lg shadow-glow max-h-48 overflow-y-auto custom-scrollbar p-1"
+                        >
+                          {availableModels
+                            .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                            .map((m) => (
+                              <div
+                                key={m.id}
+                                onClick={() => {
+                                  updateModelRouteProvider(m.id, provider.id);
+                                  setIsModelDropdownOpen(false);
+                                  setModelSearchQuery('');
+                                }}
+                                className="px-3 py-2 text-[11px] font-mono text-slate-300 hover:text-white hover:bg-cyan-500/20 rounded cursor-pointer transition-colors"
+                              >
+                                {m.name || m.id} <span className="text-slate-500 text-[10px]">({m.id})</span>
+                              </div>
+                            ))}
+                          {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
+                            <div className="px-3 py-2 text-[11px] font-mono text-slate-500 text-center">No models found</div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <AnimatePresence>
-                    {isModelDropdownOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        className="absolute z-50 w-full mt-1 bg-slate-900/95 backdrop-blur-md border border-cyan-500/30 rounded-lg shadow-glow max-h-48 overflow-y-auto custom-scrollbar p-1"
-                      >
-                        {availableModels
-                          .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
-                          .map((m) => (
-                            <div
-                              key={m.id}
-                              onClick={() => {
-                                setNewRouteForm(prev => ({ ...prev, model: m.id }));
-                                setIsModelDropdownOpen(false);
-                                setModelSearchQuery('');
-                              }}
-                              className="px-3 py-2 text-[11px] font-mono text-slate-300 hover:text-white hover:bg-cyan-500/20 rounded cursor-pointer transition-colors"
-                            >
-                              {m.name || m.id} <span className="text-slate-500 text-[10px]">({m.id})</span>
-                            </div>
-                        ))}
-                        {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
-                          <div className="px-3 py-2 text-[11px] font-mono text-slate-500 text-center">No models found</div>
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Target Provider</label>
-                  <select
-                    value={newRouteForm.providerId || routeProviders[0]?.id || ''}
-                    onChange={(e) => setNewRouteForm(prev => ({ ...prev, providerId: e.target.value }))}
-                    className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-200 focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono"
-                    disabled={routeProviders.length === 0}
-                  >
-                    {routeProviders.length === 0 ? (
-                      <option value="">No selected providers</option>
+
+                  {/* Existing Routes List */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 mt-4">
+                    <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Configured Routes</label>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      Requests keep the selected model exactly; providers are tried in priority order only when a provider fails.
+                    </p>
+
+                    {providerRoutes.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-800/50 bg-slate-950/40 px-4 py-6 text-center text-slate-600">
+                        <p className="text-xs font-medium">No models routed to this provider</p>
+                      </div>
                     ) : (
-                      routeProviders.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name || provider.id}
-                        </option>
-                      ))
+                      <div className="space-y-2">
+                        {providerRoutes.map(([model, routeValue]) => {
+                          const routeEntries = getRouteProviders(routeValue);
+                          const selectedTargets = new Set(routeEntries.map((entry) => entry.target));
+                          const fallbackOptions = routeProviders.filter((p) => !selectedTargets.has(p.id));
+
+                          return (
+                            <div key={model} className="p-3 rounded-lg border border-slate-800/60 bg-slate-950/40 group hover:border-cyan-500/30 transition-colors space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[11px] font-mono text-cyan-100 break-all">{model}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeModelRoute(model)}
+                                  className="p-1.5 rounded-md bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white cursor-pointer transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                                  title="Remove route"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+
+                              <div className="space-y-2">
+                                {routeEntries.map((entry, index) => {
+                                  const routeProvider = getProviderForRouteTarget(entry.target);
+                                  return (
+                                    <div key={`${model}-${entry.target}`} className="flex items-center gap-2 rounded-lg border border-slate-800/60 bg-slate-900/50 px-2 py-2">
+                                      <span className="w-16 shrink-0 text-[9px] font-bold uppercase tracking-[0.15em] text-cyan-400">
+                                        {index === 0 ? 'Primary' : `Fallback ${index}`}
+                                      </span>
+                                      <span className="min-w-0 flex-1 truncate text-[10px] text-slate-300" title={routeProvider.baseUrl || entry.target}>
+                                        {routeProvider.name || entry.target}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => moveRouteProvider(model, entry.target, -1)}
+                                        disabled={index === 0}
+                                        className="p-1 rounded text-slate-500 hover:text-cyan-300 disabled:opacity-30 disabled:hover:text-slate-500"
+                                        title="Move up"
+                                      >
+                                        <ArrowUp size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => moveRouteProvider(model, entry.target, 1)}
+                                        disabled={index === routeEntries.length - 1}
+                                        className="p-1 rounded text-slate-500 hover:text-cyan-300 disabled:opacity-30 disabled:hover:text-slate-500"
+                                        title="Move down"
+                                      >
+                                        <ArrowDown size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeRouteProvider(model, entry.target)}
+                                        className="p-1 rounded text-rose-400 hover:bg-rose-500/10"
+                                        title="Remove provider from route"
+                                      >
+                                        <XCircle size={12} />
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {fallbackOptions.length > 0 && (
+                                <select
+                                  value=""
+                                  onChange={(e) => {
+                                    if (e.target.value) addFallbackProvider(model, e.target.value);
+                                    e.target.value = '';
+                                  }}
+                                  className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[10px] text-slate-300 focus:border-cyan-500/50 focus:outline-none"
+                                >
+                                  <option value="">Add fallback provider...</option>
+                                  {fallbackOptions.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                  </select>
+                  </div>
                 </div>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setIsAddRouteModalOpen(false)} className="flex-1 py-2.5 rounded-xl text-xs font-bold label-caps text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer">Cancel</button>
-                <button type="button" onClick={() => { addModelRoute(); setIsAddRouteModalOpen(false); }} disabled={routeProviders.length === 0} className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-500 to-indigo-500 text-white hover:from-cyan-400 hover:to-indigo-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed">Add Route</button>
-              </div>
+
+                <div className="shrink-0 pt-4 border-t border-slate-800/50">
+                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-500 to-indigo-500 text-white hover:from-cyan-400 hover:to-indigo-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Done</button>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

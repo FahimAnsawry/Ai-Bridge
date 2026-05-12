@@ -33,7 +33,7 @@ const DEFAULTS = {
   model_routing: {},
   stub_models: [],
   request_minimization_enabled: true,
-  chat_max_upstream_attempts: 4,
+  chat_max_upstream_attempts: 20,
   token_optimization_enabled: false,
   prompt_budget_tokens: 0,
   token_summarization_enabled: false,
@@ -61,20 +61,6 @@ const DEFAULTS = {
       name: 'FreeModel',
       baseUrl: 'https://api.freemodel.dev',
       apiKey: '',
-      isActive: true
-    },
-    {
-      id: 'ollama',
-      name: 'Ollama (Local)',
-      baseUrl: 'http://localhost:11434/v1',
-      apiKey: 'ollama',
-      isActive: true
-    },
-    {
-      id: 'ollama-cloud',
-      name: 'Ollama Cloud',
-      baseUrl: 'https://ollama.com/api',
-      apiKey: '05a314ff0a324ccf856e506aa12d93fc.-dMUQ2QAVRtpN3BRD7WfHF6e',  // Set this to your key from https://ollama.com/settings/keys
       isActive: true
     }
   ]
@@ -105,13 +91,51 @@ function getActiveProviderIds(providers) {
     .filter(Boolean);
 }
 
+function normalizeModelRouteProviders(providers) {
+  if (!Array.isArray(providers)) return [];
+
+  return providers
+    .map((entry, index) => {
+      if (typeof entry === 'string') {
+        const target = entry.trim();
+        return target ? { target, priority: index + 1, index } : null;
+      }
+
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const target = String(entry.target || entry.providerId || entry.baseUrl || '').trim();
+      if (!target) return null;
+
+      const parsedPriority = Number(entry.priority);
+      const priority = Number.isFinite(parsedPriority) && parsedPriority > 0
+        ? parsedPriority
+        : index + 1;
+
+      return { target, priority, index };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.priority - b.priority || a.index - b.index)
+    .map(({ target }, index) => ({ target, priority: index + 1 }));
+}
+
+function normalizeModelRouteValue(value) {
+  if (typeof value === 'string') {
+    const target = value.trim();
+    return target || null;
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const providers = normalizeModelRouteProviders(value.providers);
+  return providers.length > 0 ? { providers } : null;
+}
+
 function normalizeModelRouting(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
 
-  return Object.entries(value).reduce((acc, [model, providerId]) => {
+  return Object.entries(value).reduce((acc, [model, routeValue]) => {
     const key = String(model || '').trim();
-    const target = String(providerId || '').trim();
-    if (key && target) acc[key] = target;
+    const route = normalizeModelRouteValue(routeValue);
+    if (key && route) acc[key] = route;
     return acc;
   }, {});
 }

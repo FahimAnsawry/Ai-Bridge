@@ -34,8 +34,8 @@ const Logs = ({ user }) => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [connected, setConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const [viewMode, setViewMode] = useState('table');
   const [autoScroll, setAutoScroll] = useState(true);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
@@ -59,16 +59,24 @@ const Logs = ({ user }) => {
     const socket = io({ transports: ['websocket', 'polling'] });
     socketRef.current = socket;
     socket.on('connect', () => {
-      setConnected(true);
-      setIsConnecting(false);
+      setConnectionStatus('connected');
+      setHasConnectedOnce(true);
       if (user?._id) {
-        socket.emit('join', user._id);
+        socket.emit('join', user._id.toString());
       }
     });
     socket.on('connect_error', () => {
-      setIsConnecting(false);
+      setConnectionStatus((status) => (status === 'connected' ? 'connecting' : status));
     });
-    socket.on('disconnect',   ()      => setConnected(false));
+    socket.io.on('reconnect_attempt', () => setConnectionStatus('connecting'));
+    socket.io.on('reconnect', () => {
+      setConnectionStatus('connected');
+      setHasConnectedOnce(true);
+    });
+    socket.io.on('reconnect_failed', () => setConnectionStatus('offline'));
+    socket.on('disconnect', (reason) => {
+      setConnectionStatus(reason === 'io server disconnect' ? 'offline' : 'connecting');
+    });
     socket.on('new_log',      (entry) => setLogs((prev) => [entry, ...prev].slice(0, 500)));
     socket.on('logs_cleared', ()      => setLogs([]));
     return () => socket.disconnect();
@@ -123,25 +131,66 @@ const Logs = ({ user }) => {
 
   const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.45, ease: [0.23, 1, 0.32, 1] } }) };
 
-  if (isConnecting) {
+  const isInitialConnecting = connectionStatus === 'connecting' && !hasConnectedOnce;
+  const isConnected = connectionStatus === 'connected';
+
+  if (isInitialConnecting) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex min-h-[calc(100dvh-8rem)] items-center justify-center px-4 lg:min-h-[calc(100dvh-5.5rem)]"
+      >
         <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-10 h-10 border-4 border-[--color-accent-blue] border-t-transparent rounded-full"
-        />
-        <p className="text-sm font-bold uppercase tracking-widest text-[--color-text-tertiary] animate-pulse">
-          Establishing Live Stream...
-        </p>
-      </div>
+          initial={{ opacity: 0, y: 18, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.45, ease: [0.23, 1, 0.32, 1] }}
+          className="relative w-full max-w-md overflow-hidden rounded-[--radius-xl] p-8 text-center shadow-2xl"
+          style={PANEL_STYLE}
+        >
+          <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: 'var(--gradient-neon)', opacity: 0.65 }} />
+          <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
+              className="absolute inset-0 rounded-full border border-transparent border-t-[--color-accent-blue] border-r-[--color-accent-purple]"
+            />
+            <motion.div
+              animate={{ scale: [1, 1.12, 1], opacity: [0.32, 0.6, 0.32] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+              className="absolute h-16 w-16 rounded-full"
+              style={{ background: 'rgba(99,102,241,0.16)' }}
+            />
+            <TerminalIcon size={28} className="relative text-[--color-accent-blue]" />
+          </div>
+          <p className="mb-3 text-xs font-black uppercase tracking-[0.28em] text-[--color-text-tertiary]">
+            Live Stream
+          </p>
+          <h1 className="text-2xl font-black tracking-tight text-[--color-text-primary]">
+            Connecting to live request stream...
+          </h1>
+          <p className="mt-3 text-sm font-semibold text-[--color-text-secondary]">
+            Preparing real-time logs for this proxy instance.
+          </p>
+          <div className="mt-6 flex justify-center gap-1.5">
+            {[0, 1, 2].map((dot) => (
+              <motion.span
+                key={dot}
+                animate={{ opacity: [0.25, 1, 0.25], y: [0, -4, 0] }}
+                transition={{ duration: 1, repeat: Infinity, delay: dot * 0.16 }}
+                className="h-2 w-2 rounded-full bg-[--color-accent-blue]"
+              />
+            ))}
+          </div>
+        </motion.div>
+      </motion.div>
     );
   }
 
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="flex flex-col gap-6 mx-auto w-full max-w-6xl"
+      className="flex h-[calc(100dvh-8rem)] flex-col gap-3 overflow-hidden mx-auto w-full max-w-6xl lg:h-[calc(100dvh-5.5rem)]"
     >
       <ConfirmationModal
         isOpen={isClearModalOpen}
@@ -153,12 +202,12 @@ const Logs = ({ user }) => {
       {/* Header */}
       <motion.header
         custom={0} variants={fadeUp} initial="hidden" animate="visible"
-        className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5"
+        className="flex shrink-0 flex-col lg:flex-row lg:items-end lg:justify-between gap-3"
       >
         <div>
           <p className="mb-2 text-xs font-black uppercase tracking-[0.25em] text-[--color-text-tertiary]">Live Stream</p>
           <h1
-            className="text-3xl font-black tracking-tight text-[--color-text-primary]"
+            className="text-2xl font-black tracking-tight text-[--color-text-primary] lg:text-3xl"
           >
             Request Activity
           </h1>
@@ -192,11 +241,11 @@ const Logs = ({ user }) => {
       {/* Filter bar */}
       <motion.section
         custom={1} variants={fadeUp} initial="hidden" animate="visible"
-        className="rounded-[--radius-lg] p-5 relative overflow-hidden"
+        className="shrink-0 rounded-[--radius-lg] p-3 relative overflow-hidden"
         style={PANEL_STYLE}
       >
         <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-[--radius-lg]" style={{ background: 'var(--gradient-neon)', opacity: 0.35 }} />
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="relative min-w-[16rem] flex-1">
             <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[--color-text-tertiary]" />
             <input
@@ -224,13 +273,15 @@ const Logs = ({ user }) => {
           <div
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest"
             style={
-              connected
+              isConnected
                 ? { background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e' }
-                : { background: 'var(--color-danger-soft)', border: '1px solid var(--color-danger-border)', color: 'var(--color-danger)' }
+                : connectionStatus === 'connecting'
+                  ? { background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }
+                  : { background: 'var(--color-danger-soft)', border: '1px solid var(--color-danger-border)', color: 'var(--color-danger)' }
             }
           >
-            {connected ? <Wifi size={12} className="animate-pulse" /> : <WifiOff size={12} />}
-            {connected ? 'Live connected' : 'System Offline'}
+            {isConnected ? <Wifi size={12} className="animate-pulse" /> : connectionStatus === 'connecting' ? <Wifi size={12} className="animate-pulse" /> : <WifiOff size={12} />}
+            {isConnected ? 'Live connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'System Offline'}
           </div>
 
           <div
@@ -264,21 +315,23 @@ const Logs = ({ user }) => {
       {/* Content Area */}
       <motion.section
         custom={2} variants={fadeUp} initial="hidden" animate="visible"
-        className="rounded-[--radius-lg] overflow-hidden relative"
+        className="min-h-0 flex-1 rounded-[--radius-lg] overflow-hidden relative"
         style={PANEL_STYLE}
       >
         <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-[--radius-lg]" style={{ background: 'var(--gradient-neon)', opacity: 0.35 }} />
-        {viewMode === 'table' ? (
-            <LogTable logs={paginatedLogs} loading={loading} />
-        ) : (
-            <LiveConsole logs={paginatedLogs} autoScroll={autoScroll} />
-        )}
+          <div className="h-full min-h-0">
+            {viewMode === 'table' ? (
+              <LogTable logs={paginatedLogs} loading={loading} />
+            ) : (
+              <LiveConsole logs={paginatedLogs} autoScroll={autoScroll} />
+            )}
+          </div>
       </motion.section>
 
       {!loading && filtered.length > 0 && (
         <motion.nav
           custom={3} variants={fadeUp} initial="hidden" animate="visible"
-          className="flex flex-col gap-3 rounded-[--radius-lg] p-4 sm:flex-row sm:items-center sm:justify-between"
+          className="shrink-0 flex flex-col gap-2 rounded-[--radius-lg] p-3 sm:flex-row sm:items-center sm:justify-between"
           style={PANEL_STYLE}
           aria-label="Logs pagination"
         >

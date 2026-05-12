@@ -13,6 +13,31 @@ const benignProxySocketErrors = new Set([
 
 const isBenignProxyError = (err) => benignProxySocketErrors.has(err?.code);
 
+const sendBackendUnavailable = (res, req, err) => {
+  if (!res || res.headersSent || typeof res.end !== 'function') return;
+
+  const requestPath = req?.url || '';
+  const isHttpApiRequest =
+    requestPath.startsWith('/health') ||
+    requestPath.startsWith('/api') ||
+    requestPath.startsWith('/auth') ||
+    requestPath.startsWith('/copilot');
+
+  if (!isHttpApiRequest) {
+    res.statusCode = 502;
+    res.end();
+    return;
+  }
+
+  const code = err?.code || 'BACKEND_UNAVAILABLE';
+  res.statusCode = 502;
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({
+    error: `Local backend API is not reachable at ${backendTarget}. Start the backend with npm run dev or npm run start.`,
+    code,
+  }));
+};
+
 const ignoreBenignProxyErrors = (proxy) => {
   if (!proxy || proxy.__aiBridgeProxyPatched) return;
 
@@ -23,9 +48,7 @@ const ignoreBenignProxyErrors = (proxy) => {
     if (event === 'error' && typeof listener === 'function') {
       return originalOn(event, (err, req, res) => {
         if (isBenignProxyError(err)) {
-          if (res && !('req' in res) && typeof res.end === 'function') {
-            res.end();
-          }
+          sendBackendUnavailable(res, req, err);
           return;
         }
 
@@ -57,7 +80,9 @@ const ignoreBenignSocketErrors = (socket) => {
 
 const configureProxy = (proxy) => {
   ignoreBenignProxyErrors(proxy);
-  proxy.on('error', () => {});
+  proxy.on('error', (err, req, res) => {
+    sendBackendUnavailable(res, req, err);
+  });
 };
 
 const configureWebSocketProxy = (proxy) => {
@@ -73,6 +98,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
+      '/health': {
+        target: backendTarget,
+        changeOrigin: true,
+        configure: configureProxy,
+      },
       '/api': {
         target: backendTarget,
         changeOrigin: true,

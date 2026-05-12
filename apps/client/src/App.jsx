@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import Sidebar from './components/layout/Sidebar';
 import Overview from './pages/Overview';
@@ -20,6 +20,8 @@ function AppContent() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const { showToast } = useToast();
+  const location = useLocation();
+  const isSettingsPage = location.pathname === '/settings';
 
   useEffect(() => {
     fetchAuthStatus()
@@ -79,7 +81,7 @@ function AppContent() {
         user={user}
       />
 
-      <main className='relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-24 sm:px-8 sm:pb-12 sm:pt-28 lg:pt-10 transition-all duration-300 overflow-y-auto'>
+      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-24 sm:px-8 sm:pb-12 sm:pt-28 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <div className='mx-auto w-full max-w-[92rem]'>
           <AnimatePresence mode='wait'>
             <Routes>

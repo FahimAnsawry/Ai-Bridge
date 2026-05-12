@@ -1,3 +1,4 @@
+
 /**
  * proxy.js — Core Proxy Logic
  * Forwards OpenAI-compatible requests to the configured upstream API,
@@ -66,21 +67,20 @@ const RESPONSE_CACHE_MAX_ENTRIES = 200;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_NVIDIA_NIM_TIMEOUT_MS = DEFAULT_UPSTREAM_TIMEOUT_MS;
 const DEFAULT_NVIDIA_NIM_SLOW_LOG_MS = 15_000;
+const FREEMODEL_RATE_LIMIT_DEFAULT_WAIT_MS = 5_000;
+const FREEMODEL_RATE_LIMIT_MAX_WAIT_MS = 65_000;
+const FREEMODEL_RATE_LIMIT_MAX_RETRIES = 2;
 const claudeSettingsCache = new Map();
 
 // ── NVIDIA NIM Client-Side Rate Limiter ──────────────────────────────────────
-// Proactively enforces RPM / RPD limits per model so requests never reach the
-// upstream quota wall. Limits are configurable via env vars; free-tier defaults
-// match NVIDIA NIM's documented limits (5 RPM, 100 RPD).
-const NVIDIA_NIM_RPM_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPM_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 5; })();
-const NVIDIA_NIM_RPD_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPD_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 100; })();
+// Proactively enforces RPM limit per model so requests never reach the
+// upstream quota wall. Limit is configurable via env var; default is 35 RPM.
+const NVIDIA_NIM_RPM_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPM_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 35; })();
 
 class NvidiaNimRateLimiter {
-  constructor(rpmLimit, rpdLimit) {
+  constructor(rpmLimit) {
     this.rpmLimit = rpmLimit;
-    this.rpdLimit = rpdLimit;
     this._rpm = new Map(); // model -> sorted ms timestamps (last 60s)
-    this._rpd = new Map(); // model -> sorted ms timestamps (last 24h)
   }
 
   _get(map, model, cutoff) {
@@ -91,36 +91,26 @@ class NvidiaNimRateLimiter {
 
   /**
    * Acquire a rate-limit slot for the given model.
-   * - If the daily quota is exhausted: returns { blocked: true, reason: 'daily' }.
    * - If the per-minute quota is full: waits transparently until the next slot
    *   opens, then records and returns { blocked: false }.
    * - Otherwise: records immediately and returns { blocked: false }.
    */
   async acquire(model) {
-    const now = Date.now();
-    const rpd = this._get(this._rpd, model, now - 86_400_000);
-
-    if (rpd.length >= this.rpdLimit) {
-      return { blocked: true, reason: 'daily' };
-    }
-
-    const rpm = this._get(this._rpm, model, now - 60_000);
-    if (rpm.length >= this.rpmLimit) {
-      // Wait until the oldest in-window request ages out
+    // Loop until a slot is available — handles concurrent waiters that all
+    // wake up at the same time and would otherwise all push past the limit.
+    while (true) {
+      const rpm = this._get(this._rpm, model, Date.now() - 60_000);
+      if (rpm.length < this.rpmLimit) break;
       const waitMs = Math.min(rpm[0] + 60_000 - Date.now() + 150, 65_000);
       console.warn(
         `[nvidia-nim-limiter] RPM limit (${this.rpmLimit}/min) reached for "${model}"; ` +
         `queuing request for ${(waitMs / 1000).toFixed(1)}s`
       );
       await new Promise(resolve => setTimeout(resolve, waitMs));
-      // Re-check daily quota after the wait
-      const rpdAfter = this._get(this._rpd, model, Date.now() - 86_400_000);
-      if (rpdAfter.length >= this.rpdLimit) return { blocked: true, reason: 'daily' };
     }
 
     const ts = Date.now();
     this._get(this._rpm, model, ts - 60_000).push(ts);
-    this._get(this._rpd, model, ts - 86_400_000).push(ts);
     return { blocked: false };
   }
 
@@ -130,13 +120,11 @@ class NvidiaNimRateLimiter {
     return {
       rpmUsed:  this._get(this._rpm, model, now - 60_000).length,
       rpmLimit: this.rpmLimit,
-      rpdUsed:  this._get(this._rpd, model, now - 86_400_000).length,
-      rpdLimit: this.rpdLimit,
     };
   }
 }
 
-const nvidiaNimLimiter = new NvidiaNimRateLimiter(NVIDIA_NIM_RPM_LIMIT, NVIDIA_NIM_RPD_LIMIT);
+const nvidiaNimLimiter = new NvidiaNimRateLimiter(NVIDIA_NIM_RPM_LIMIT);
 
 function getClaudeSettingsPath() {
   const configDir = process.env.CLAUDE_CONFIG_DIR ||
@@ -231,6 +219,11 @@ function normalizeClaudeModelAlias(model) {
   if (/^claude-sonnet-4[-.]6(?:-\d{8})?-1[km]$/i.test(normalized)) {
     return 'claude-sonnet-4.6';
   }
+
+  // Map claude-opus-4.7 to claude-opus-4.6
+  // if (/^claude-opus-4[-.]7$/i.test(normalized)) {
+  //   return 'claude-opus-4.6';
+  // }
 
   return model;
 }
@@ -1005,7 +998,7 @@ class AnthropicSSETranslator {
     }
   }
 
-  finish(stopReason = 'end_turn') {
+  finish(stopReason = 'end_turn', usage = {}) {
     if (!this.sentMessageStart) this.start();
 
     // Close thinking tag if it was left open!
@@ -1039,7 +1032,10 @@ class AnthropicSSETranslator {
     this.res.write(`data: ${JSON.stringify({
       type: 'message_delta',
       delta: { stop_reason: stopReason, stop_sequence: null },
-      usage: { output_tokens: 0 }
+      usage: {
+        input_tokens: usage.promptTokens || 0,
+        output_tokens: usage.completionTokens || 0,
+      }
     })}\n\n`);
 
     this.res.write('event: message_stop\n');
@@ -1056,10 +1052,13 @@ class AnthropicSSETranslator {
 function buildUpstreamRequest(req, baseUrl, apiKey) {
   // Build CLEAN headers — do NOT spread req.headers.
   const headers = {
-    'authorization': `Bearer ${apiKey}`,
     'content-type': 'application/json',
     'accept': 'application/json, text/event-stream',
   };
+
+  if (apiKey && !(isFreeModelProvider(baseUrl) && isFreeModelPlaceholderApiKey(apiKey))) {
+    headers['authorization'] = `Bearer ${apiKey}`;
+  }
 
   // Bypassing AgentRouter 'unauthorized client' detection.
   if (baseUrl.includes('agentrouter')) {
@@ -1199,6 +1198,102 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     if (isNvidiaNimRequest && !useNativeNvidiaMessages) {
       sanitizeNvidiaNimRequestBody(bodyData, { preserveTools: req.__nvidiaNimStripTools !== true });
     }
+
+    // FreeModel: strip tools and flatten tool-call history.
+    // api.freemodel.dev is a free, limited API that rejects requests with tool
+    // definitions or tool-call/tool-result turns. After the first response,
+    // Claude CLI includes its built-in tools on every subsequent request, which
+    // causes FreeModel to return an error. We strip all tool-related fields and
+    // flatten tool turns into plain-text so the conversation history stays valid.
+    if (isFreeModelProvider(baseUrl)) {
+      // FreeModel returns 401 on streaming requests — force non-streaming
+      bodyData.stream = false;
+      delete bodyData.tools;
+      delete bodyData.tool_choice;
+      if (Array.isArray(bodyData.messages)) {
+        // Pass 1: Remove tool-role messages and flatten tool_calls turns
+        bodyData.messages = bodyData.messages
+          .map((msg) => {
+            if (!msg || typeof msg !== 'object') return null;
+            // Drop pure tool-result turns (role === 'tool')
+            if (msg.role === 'tool') return null;
+
+            // Handle Anthropic-format: assistant with content array containing tool_use blocks
+            if ((msg.role === 'assistant' || msg.role === 'model') && Array.isArray(msg.content)) {
+              const textBlocks = msg.content.filter(b => b && b.type === 'text');
+              const hasToolUse = msg.content.some(b => b && b.type === 'tool_use');
+              if (hasToolUse) {
+                const textContent = textBlocks.map(b => b.text).join('\n').trim();
+                return {
+                  role: 'assistant',
+                  content: textContent || '[tool call omitted]',
+                };
+              }
+            }
+
+            // Handle Anthropic-format: user with content array containing tool_result blocks.
+            // Keep any text blocks; if nothing remains, drop the message entirely.
+            if (msg.role === 'user' && Array.isArray(msg.content)) {
+              const hasToolResult = msg.content.some(b => b && b.type === 'tool_result');
+              if (hasToolResult) {
+                const textBlocks = msg.content.filter(b => b && b.type === 'text');
+                if (textBlocks.length === 0) return null;
+                return { role: 'user', content: textBlocks.map(b => b.text).join('\n').trim() };
+              }
+              // Flatten plain text-only content arrays to a string
+              const allText = msg.content.every(b => b && b.type === 'text');
+              if (allText) {
+                return { role: 'user', content: msg.content.map(b => b.text).join('\n').trim() };
+              }
+            }
+
+            // Handle OpenAI-format: assistant turns with tool_calls array
+            if ((msg.role === 'assistant' || msg.role === 'model') &&
+                Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+              const textContent = typeof msg.content === 'string' ? msg.content.trim() : '';
+              return {
+                role: 'assistant',
+                content: textContent || '[tool call omitted]',
+              };
+            }
+            // Strip tool_calls from assistant turns that have both text + tool calls
+            if (msg.tool_calls) {
+              const { tool_calls, ...rest } = msg;
+              return rest;
+            }
+            return msg;
+          })
+          .filter(Boolean);
+
+        // Pass 2: Collapse consecutive same-role turns (stripping can create them)
+        const collapsed = [];
+        for (const msg of bodyData.messages) {
+          const last = collapsed[collapsed.length - 1];
+          if (last && last.role === msg.role && msg.role !== 'tool' && typeof last.content === 'string' && typeof msg.content === 'string') {
+            last.content = (last.content + '\n' + msg.content).trim();
+          } else {
+            collapsed.push({ ...msg });
+          }
+        }
+        bodyData.messages = collapsed;
+
+        // Pass 3: Ensure conversation starts with a user message (not assistant)
+        const firstNonSys = bodyData.messages.findIndex(m => m.role !== 'system');
+        if (firstNonSys >= 0 && bodyData.messages[firstNonSys].role !== 'user') {
+          bodyData.messages.splice(firstNonSys, 0, {
+            role: 'user',
+            content: '[Context continued]',
+          });
+        }
+
+        // Pass 4: Ensure messages array is non-empty
+        // Note: Do NOT add a fake user message at the end - this corrupts conversation history
+        // and causes FreeModel to stop responding after the first turn.
+        if (bodyData.messages.length === 0) {
+          bodyData.messages = [{ role: 'user', content: 'Hello' }];
+        }
+      }
+    }
   }
 
   // EcomAgent only supports: claude-opus-4-6, claude-opus-4.6, mmodel, claudex-4.7-5.4
@@ -1214,7 +1309,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
         // Map claude-opus-4-7 / claude-opus-4.7 (new Opus 4.7 CLI default) → opus-4.6
         .replace(/claude-opus-4[-.]7[\w.-]*/g, 'claude-opus-4.6')
         // Map sonnet (any variant) → opus
-        .replace(/claude-sonnet-4[-.]6/g, 'claude-opus-4.6')
+        .replace(/claude-sonnet-[\w.-]+/g, 'claude-opus-4.6')
         // Map haiku (any variant) → opus
         .replace(/claude-haiku[\w.-]*/g, 'claude-opus-4.6')
         // Map claude-3 legacy models → opus
@@ -1229,9 +1324,24 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     }
   }
 
-  // Clamp max_tokens: some providers reject very large values
-  if (bodyData?.max_tokens && bodyData.max_tokens > 8192) {
-    bodyData.max_tokens = 8192;
+  // Clamp max_tokens for NVIDIA NIM only — NIM rejects very large values
+  // Kimi K2 supports up to 131072 output tokens; other NIM models cap at 8192
+  if (isNvidiaNimRequest && bodyData?.max_tokens) {
+    const isKimiModel = typeof bodyData.model === 'string' && /kimi/i.test(bodyData.model);
+    const nimMaxTokens = isKimiModel ? 131072 : 8192;
+    if (bodyData.max_tokens > nimMaxTokens) bodyData.max_tokens = nimMaxTokens;
+  }
+
+  if (
+    bodyData?.stream === true &&
+    upstreamPath.includes('/chat/completions') &&
+    !isAnthropic &&
+    !useNativeNvidiaMessages
+  ) {
+    bodyData.stream_options = {
+      ...(bodyData.stream_options || {}),
+      include_usage: true,
+    };
   }
 
 
@@ -1305,10 +1415,93 @@ function attemptLabel(req) {
   return ` (attempt ${state.usedAttempts}/${state.maxAttempts})`;
 }
 
+function maskApiKey(apiKey) {
+  const value = String(apiKey || '');
+  if (!value) return 'none';
+  if (value.length <= 12) return `${value.slice(0, 4)}...`;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function getProviderApiKeys(provider) {
+  const keys = [];
+  const addKey = (key) => {
+    if (typeof key !== 'string' || !key.trim()) return;
+    if (!keys.includes(key)) keys.push(key);
+  };
+
+  if (Array.isArray(provider?.apiKeys)) {
+    provider.apiKeys.forEach(addKey);
+  }
+  addKey(provider?.apiKey);
+
+  return keys;
+}
+
+function isRetryableApiKeyFailure(status, message, rawUpstreamMessage, upstreamErrorCode, err) {
+  if (!err?.response) return true;
+  if ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500) return true;
+
+  const text = `${upstreamErrorCode || ''}\n${message || ''}\n${rawUpstreamMessage || ''}`;
+  return /rate[-_\s]?limit|too many requests|quota|insufficient[-_\s]?(credit|credits|balance|funds)|credits?\s+exhausted|balance\s+exhausted|limit\s+exceeded|exceeded\s+quota|resource_exhausted/i.test(text);
+}
+
+async function retryWithNextProviderApiKey(req, res, provider, apiKey, details) {
+  if (!provider?.id) {
+    console.warn('[proxy] API-key failover skipped: no current provider context available.');
+    return null;
+  }
+
+  const {
+    status,
+    message,
+    rawUpstreamMessage,
+    upstreamErrorCode,
+    err,
+  } = details || {};
+
+  if (!isRetryableApiKeyFailure(status, message, rawUpstreamMessage, upstreamErrorCode, err)) {
+    return null;
+  }
+
+  if (!req.__triedKeys) req.__triedKeys = {};
+  if (!req.__triedKeys[provider.id]) req.__triedKeys[provider.id] = new Set();
+  if (apiKey) req.__triedKeys[provider.id].add(apiKey);
+
+  const keys = getProviderApiKeys(provider);
+  const nextKey = keys.find(k => !req.__triedKeys[provider.id].has(k));
+  const providerLabel = provider.name || provider.id;
+  const reason = status ? `status ${status}` : 'network error';
+
+  if (!nextKey) {
+    req.__sameProviderKeyFailoverExhausted = true;
+    console.warn(
+      `[proxy] ${providerLabel} returned ${reason}; all API keys for this provider are exhausted. ` +
+      'Provider fallback is skipped for API-key failover.'
+    );
+    return null;
+  }
+
+  if (!canRetry(req)) {
+    console.warn(`[proxy] API-key failover retry skipped for ${providerLabel}: attempt budget exhausted${attemptLabel(req)}`);
+    return sendAttemptBudgetExhausted(req, res);
+  }
+
+  req.__sameProviderRetryProviderId = provider.id;
+  req.__sameProviderKeyFailoverExhausted = false;
+  console.warn(
+    `[proxy] ${providerLabel} returned ${reason} with API key ${maskApiKey(apiKey)}; ` +
+    `retrying same provider with next API key ${maskApiKey(nextKey)}${attemptLabel(req)}`
+  );
+  await proxyRequest(req, res);
+  return true;
+}
+
 function providerHasBaseUrlAndKey(provider) {
   if (!provider || typeof provider !== 'object') return false;
   const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
-  const hasApiKey = Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
+  const hasApiKey = isFreeModelProvider(provider)
+    ? providerHasRealFreeModelApiKey(provider)
+    : Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
   return hasBaseUrl && hasApiKey;
 }
 
@@ -1316,23 +1509,75 @@ function normalizeBaseUrlForMatch(value) {
   return typeof value === 'string' ? value.replace(/\/+$/, '') : '';
 }
 
+function normalizeRouteTargets(routeValue) {
+  if (typeof routeValue === 'string') {
+    const target = routeValue.trim();
+    return target ? { legacyFixed: true, targets: [{ target, priority: 1 }] } : null;
+  }
+
+  if (!routeValue || typeof routeValue !== 'object' || Array.isArray(routeValue) || !Array.isArray(routeValue.providers)) {
+    return null;
+  }
+
+  const targets = routeValue.providers
+    .map((entry, index) => {
+      if (typeof entry === 'string') {
+        const target = entry.trim();
+        return target ? { target, priority: index + 1, index } : null;
+      }
+
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const target = String(entry.target || entry.providerId || entry.baseUrl || '').trim();
+      if (!target) return null;
+      const parsedPriority = Number(entry.priority);
+      return {
+        target,
+        priority: Number.isFinite(parsedPriority) && parsedPriority > 0 ? parsedPriority : index + 1,
+        index,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.priority - b.priority || a.index - b.index)
+    .map(({ target }, index) => ({ target, priority: index + 1 }));
+
+  return targets.length > 0 ? { legacyFixed: false, targets } : null;
+}
+
+function buildModelRoute(model, key, routeValue, exact) {
+  const route = normalizeRouteTargets(routeValue);
+  if (!route) return null;
+  return { model: key || model, exact, ...route };
+}
+
 function findModelRoute(model, modelRouting) {
   if (!model || !modelRouting || typeof modelRouting !== 'object' || Array.isArray(modelRouting)) return null;
   const requestedModel = String(model);
-  const exactTarget = typeof modelRouting[requestedModel] === 'string' ? modelRouting[requestedModel].trim() : '';
-  if (exactTarget) {
-    return { model: requestedModel, target: exactTarget, exact: true };
+  const exactRoute = buildModelRoute(requestedModel, requestedModel, modelRouting[requestedModel], true);
+  if (exactRoute) return exactRoute;
+
+  // Fallback: Try matching without vendor prefix (e.g. "qwen/" in "qwen/qwen3.5-397b-a17b")
+  if (requestedModel.includes('/')) {
+    const requestedModelNoPrefix = requestedModel.split('/').slice(1).join('/');
+    const noPrefixRoute = buildModelRoute(requestedModel, requestedModelNoPrefix, modelRouting[requestedModelNoPrefix], true);
+    if (noPrefixRoute) return noPrefixRoute;
+  }
+
+  // Fallback 2: Try matching after normalizing both requested model and routing keys
+  const requestedNormalized = normalizeClaudeModelAlias(requestedModel);
+  for (const [key, routeValue] of Object.entries(modelRouting)) {
+    if (normalizeClaudeModelAlias(key) === requestedNormalized) {
+      const normalizedRoute = buildModelRoute(requestedModel, key, routeValue, true);
+      if (normalizedRoute) return normalizedRoute;
+    }
   }
 
   return Object.entries(modelRouting)
-    .filter(([key, target]) =>
-      key &&
-      typeof target === 'string' &&
-      target.trim() &&
-      requestedModel.startsWith(key)
-    )
-    .sort(([a], [b]) => b.length - a.length)
-    .map(([key, target]) => ({ model: key, target: target.trim(), exact: false }))
+    .map(([key, routeValue]) => {
+      if (!key || !requestedModel.startsWith(key)) return null;
+      return buildModelRoute(requestedModel, key, routeValue, false);
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.model.length - a.model.length)
     [0] || null;
 }
 
@@ -1349,6 +1594,60 @@ function resolveRoutedProvider(routeTarget, providers) {
   }) || null;
 }
 
+function resolveRoutedProviders(route, providers) {
+  if (!route?.targets) return [];
+  const seenProviderIds = new Set();
+
+  return route.targets
+    .map((entry) => {
+      const provider = resolveRoutedProvider(entry.target, providers);
+      return provider ? { ...entry, provider } : { ...entry, provider: null };
+    })
+    .filter((entry) => {
+      if (!entry.provider?.id) return true;
+      if (seenProviderIds.has(entry.provider.id)) return false;
+      seenProviderIds.add(entry.provider.id);
+      return true;
+    });
+}
+
+function getUsableRouteCandidates(route, providers) {
+  return resolveRoutedProviders(route, providers)
+    .filter((entry) => entry.provider && providerHasBaseUrlAndKey(entry.provider));
+}
+
+function getRouteTargetLabel(route) {
+  return (route?.targets || []).map((entry) => entry.target).join(' → ');
+}
+
+function getRouteCacheProviderId(route) {
+  if (!route || route.legacyFixed) return null;
+  const signature = (route.targets || []).map((entry) => entry.target).join('>');
+  return signature ? `route:${route.model}:${signature}` : null;
+}
+
+function getNextRouteProvider(req, failedProviderId) {
+  const route = req.__modelRoute;
+  if (!route || route.legacyFixed || !Array.isArray(route.candidates)) return null;
+
+  if (!req.__triedProviders) req.__triedProviders = new Set();
+  if (failedProviderId) req.__triedProviders.add(failedProviderId);
+
+  const nextCandidate = route.candidates.find((candidate) => {
+    const id = candidate.provider?.id;
+    return id && !req.__triedProviders.has(id);
+  });
+
+  return nextCandidate?.provider || null;
+}
+
+function shouldRouteFailover(status, err, isModelUnavailable) {
+  if (isModelUnavailable) return true;
+  if (!err?.response) return true;
+  if (status === 429) return true;
+  return [500, 502, 503, 504].includes(status);
+}
+
 function sendModelRouteConfigError(req, res, message, code = 'invalid_model_route') {
   console.warn(`[proxy] ${message}`);
 
@@ -1359,6 +1658,7 @@ function sendModelRouteConfigError(req, res, message, code = 'invalid_model_rout
         type: 'api_error',
         message,
       },
+      usage: { input_tokens: 0, output_tokens: 0 },
     });
   }
 
@@ -1400,7 +1700,8 @@ function sendAttemptBudgetExhausted(req, res) {
       error: {
         type: 'rate_limit_error',
         message,
-      }
+      },
+      usage: { input_tokens: 0, output_tokens: 0 },
     });
   }
 
@@ -1436,6 +1737,75 @@ function normalizeTimyModel(model) {
 
 function getTimyUnsupportedModelMessage(model) {
   return `Timy only supports these model ids: ${TIMY_SUPPORTED_MODELS.join(', ')}. Requested model: "${model || 'unknown'}".`;
+}
+
+function isFreeModelProvider(providerOrBaseUrl) {
+  const baseUrl = typeof providerOrBaseUrl === 'string'
+    ? providerOrBaseUrl
+    : providerOrBaseUrl?.baseUrl;
+  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('freemodel.dev');
+}
+
+function isFreeModelPlaceholderApiKey(apiKey) {
+  return String(apiKey || '').trim().toLowerCase() === 'freemodel';
+}
+
+function providerHasRealFreeModelApiKey(provider) {
+  if (!provider || typeof provider !== 'object') return false;
+  const keys = Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0
+    ? provider.apiKeys
+    : [provider.apiKey];
+  return keys.some((key) => key && !isFreeModelPlaceholderApiKey(key));
+}
+
+function compactUpstreamErrorText(value, maxLength = 500) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function getRateLimitWaitMs(retryAfterRaw, defaultWaitMs = FREEMODEL_RATE_LIMIT_DEFAULT_WAIT_MS) {
+  if (retryAfterRaw) {
+    const retryAfter = String(retryAfterRaw).trim();
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(seconds * 1000, FREEMODEL_RATE_LIMIT_MAX_WAIT_MS);
+    }
+
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      const waitMs = retryAt - Date.now();
+      if (waitMs > 0) return Math.min(waitMs, FREEMODEL_RATE_LIMIT_MAX_WAIT_MS);
+    }
+  }
+
+  return defaultWaitMs;
+}
+
+function sendFreeModelRateLimitError(req, res) {
+  const retries = req.__freeModelRateLimitRetries || 0;
+  const message = `FreeModel is rate limited. Retried ${retries} time(s); please wait and try again.`;
+
+  if (req.path.includes('/messages')) {
+    return res.status(429).json({
+      type: 'error',
+      error: {
+        type: 'rate_limit_error',
+        message,
+      },
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+  }
+
+  return res.status(429).json({
+    error: {
+      message,
+      type: 'rate_limit_error',
+      code: 'freemodel_rate_limited',
+    },
+  });
 }
 
 function normalizeRemovedClaudeHaikuModel(model) {
@@ -1533,6 +1903,16 @@ async function proxyRequest(req, res) {
   };
 
   if (!userId) {
+    if (req.path.includes('/messages')) {
+      return res.status(401).json({
+        type: 'error',
+        error: {
+          type: 'authentication_error',
+          message: 'Unauthorized: missing user context',
+        },
+        usage: { input_tokens: 0, output_tokens: 0 },
+      });
+    }
     return res.status(401).json({ error: 'Unauthorized: missing user context' });
   }
 
@@ -1595,6 +1975,7 @@ async function proxyRequest(req, res) {
           return res.status(400).json({
             type: 'error',
             error: { type: 'invalid_request_error', message },
+            usage: { input_tokens: 0, output_tokens: 0 }
           });
         }
         return res.status(400).json({
@@ -1700,19 +2081,31 @@ async function proxyRequest(req, res) {
   const eligibleProvidersForCache = selectedProvidersForCache;
   const preCacheModelRoute = findModelRoute(req.body?.model || '', config.model_routing);
   if (preCacheModelRoute) {
-    const preCacheRoutedProvider = resolveRoutedProvider(preCacheModelRoute.target, configuredProviders);
-    if (!preCacheRoutedProvider) {
+    const preCacheRouteCandidates = resolveRoutedProviders(preCacheModelRoute, configuredProviders);
+    const preCacheUsableCandidates = preCacheRouteCandidates.filter((entry) => entry.provider && providerHasBaseUrlAndKey(entry.provider));
+    if (preCacheModelRoute.legacyFixed) {
+      const preCacheTarget = preCacheModelRoute.targets[0]?.target || '';
+      const preCacheRoutedProvider = preCacheRouteCandidates[0]?.provider || null;
+      if (!preCacheRoutedProvider) {
+        return sendModelRouteConfigError(
+          req,
+          res,
+          `Model route "${preCacheModelRoute.model}" points to provider "${preCacheTarget}", but that provider is not configured.`
+        );
+      }
+      if (!providerHasBaseUrlAndKey(preCacheRoutedProvider)) {
+        return sendModelRouteConfigError(
+          req,
+          res,
+          `Model route "${preCacheModelRoute.model}" points to provider "${preCacheRoutedProvider.name || preCacheRoutedProvider.id}", but it is missing a base URL or API key.`,
+          'model_route_provider_not_ready'
+        );
+      }
+    } else if (preCacheUsableCandidates.length === 0) {
       return sendModelRouteConfigError(
         req,
         res,
-        `Model route "${preCacheModelRoute.model}" points to provider "${preCacheModelRoute.target}", but that provider is not configured.`
-      );
-    }
-    if (!providerHasBaseUrlAndKey(preCacheRoutedProvider)) {
-      return sendModelRouteConfigError(
-        req,
-        res,
-        `Model route "${preCacheModelRoute.model}" points to provider "${preCacheRoutedProvider.name || preCacheRoutedProvider.id}", but it is missing a base URL or API key.`,
+        `Model route "${preCacheModelRoute.model}" has no usable configured providers. Targets: ${getRouteTargetLabel(preCacheModelRoute) || 'none'}.`,
         'model_route_provider_not_ready'
       );
     }
@@ -1721,11 +2114,13 @@ async function proxyRequest(req, res) {
   let cacheKey = null;
   if (cacheEligible) {
     const requestedForCache = req.body?.model || '';
-    const routedCacheTarget = findModelRoute(requestedForCache, config.model_routing)?.target || null;
+    const routedCacheRoute = findModelRoute(requestedForCache, config.model_routing);
+    const routedCacheTarget = routedCacheRoute?.legacyFixed ? routedCacheRoute.targets[0]?.target : null;
     const routedCacheProvider = routedCacheTarget
-      ? resolveRoutedProvider(routedCacheTarget, eligibleProvidersForCache)
+      ? resolveRoutedProvider(routedCacheTarget, configuredProviders)
       : null;
     const cacheProviderId = req.__currentProviderId
+      || getRouteCacheProviderId(routedCacheRoute)
       || routedCacheProvider?.id
       || config.active_provider_id
       || 'active';
@@ -1794,29 +2189,53 @@ async function proxyRequest(req, res) {
   const requestedModelForRouting = req.body?.model || '';
   const fixedModelRoute = findModelRoute(requestedModelForRouting, config.model_routing);
   let fixedRouteProvider = null;
+  let routeCandidates = [];
 
   if (fixedModelRoute) {
     // Fixed routes search ALL configured providers, not just the active/default one.
     // isActive on a provider only controls default-provider behavior and fallback eligibility,
     // not whether it can be explicitly targeted by a model route.
-    fixedRouteProvider = resolveRoutedProvider(fixedModelRoute.target, configuredProviders);
-    if (!fixedRouteProvider) {
-      return sendModelRouteConfigError(
-        req,
-        res,
-        `Model route "${fixedModelRoute.model}" points to provider "${fixedModelRoute.target}", but that provider is not configured.`
-      );
+    routeCandidates = resolveRoutedProviders(fixedModelRoute, configuredProviders);
+
+    if (fixedModelRoute.legacyFixed) {
+      const routeTarget = fixedModelRoute.targets[0]?.target || '';
+      fixedRouteProvider = routeCandidates[0]?.provider || null;
+      if (!fixedRouteProvider) {
+        return sendModelRouteConfigError(
+          req,
+          res,
+          `Model route "${fixedModelRoute.model}" points to provider "${routeTarget}", but that provider is not configured.`
+        );
+      }
+      if (!providerHasBaseUrlAndKey(fixedRouteProvider)) {
+        return sendModelRouteConfigError(
+          req,
+          res,
+          `Model route "${fixedModelRoute.model}" points to provider "${fixedRouteProvider.name || fixedRouteProvider.id}", but it is missing a base URL or API key.`,
+          'model_route_provider_not_ready'
+        );
+      }
+      req.__fixedModelRouteProviderId = fixedRouteProvider.id;
+      req.__fixedModelRouteKey = fixedModelRoute.model;
+    } else {
+      routeCandidates = routeCandidates.filter((entry) => entry.provider && providerHasBaseUrlAndKey(entry.provider));
+      if (routeCandidates.length === 0) {
+        return sendModelRouteConfigError(
+          req,
+          res,
+          `Model route "${fixedModelRoute.model}" has no usable configured providers. Targets: ${getRouteTargetLabel(fixedModelRoute) || 'none'}.`,
+          'model_route_provider_not_ready'
+        );
+      }
+      req.__modelRoute = {
+        key: fixedModelRoute.model,
+        legacyFixed: false,
+        candidates: routeCandidates,
+      };
+      const routeProviderId = req.__sameProviderRetryProviderId || req.__currentProviderId;
+      fixedRouteProvider = routeCandidates.find((entry) => entry.provider.id === routeProviderId)?.provider
+        || routeCandidates[0].provider;
     }
-    if (!providerHasBaseUrlAndKey(fixedRouteProvider)) {
-      return sendModelRouteConfigError(
-        req,
-        res,
-        `Model route "${fixedModelRoute.model}" points to provider "${fixedRouteProvider.name || fixedRouteProvider.id}", but it is missing a base URL or API key.`,
-        'model_route_provider_not_ready'
-      );
-    }
-    req.__fixedModelRouteProviderId = fixedRouteProvider.id;
-    req.__fixedModelRouteKey = fixedModelRoute.model;
   }
 
   const configuredActiveProvider = eligibleProviders.find((p) => p.id === config.active_provider_id) || null;
@@ -1828,6 +2247,8 @@ async function proxyRequest(req, res) {
   // "undo" an automatic recovery decision.
   if (fixedRouteProvider) {
     providerToUseId = fixedRouteProvider.id;
+  } else if (req.__sameProviderRetryProviderId) {
+    providerToUseId = req.__sameProviderRetryProviderId;
   } else if (req.__currentProviderId && !strictProviderRouting) {
     providerToUseId = req.__currentProviderId;
   } else if (clientRequestedProviderId && !configuredActiveProviderIsNvidiaNim && !strictProviderRouting) {
@@ -1894,7 +2315,8 @@ async function proxyRequest(req, res) {
         error: {
           type: 'api_error',
           message: 'No provider configured. Please add a provider in Settings.'
-        }
+        },
+        usage: { input_tokens: 0, output_tokens: 0 },
       });
     }
     return res.status(503).json({
@@ -1918,11 +2340,14 @@ async function proxyRequest(req, res) {
   
   if (!apiKey && activeProvider.apiKey) apiKey = activeProvider.apiKey;
   apiKey = apiKey || '';
+  if (isFreeModelProvider(activeProvider) && isFreeModelPlaceholderApiKey(apiKey)) {
+    apiKey = '';
+  }
 
-  const maskedKey = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'none';
+  const maskedKey = maskApiKey(apiKey);
   // console.log(`[proxy] Active provider: ${activeProvider.name} (${baseUrl}) using key: ${maskedKey}`);
 
-  if (!apiKey) {
+  if (!apiKey && !isFreeModelProvider(activeProvider)) {
     console.error(`[proxy] ❌ No API key found for provider "${activeProvider.name}" (ID: ${activeProvider.id})`);
     if (req.path.includes('/messages')) {
       return res.status(503).json({
@@ -1930,7 +2355,8 @@ async function proxyRequest(req, res) {
         error: {
           type: 'api_error',
           message: `No API key configured for provider "${activeProvider.name}". Please add one in the Dashboard Settings.`
-        }
+        },
+        usage: { input_tokens: 0, output_tokens: 0 },
       });
     }
     return res.status(503).json({
@@ -1988,6 +2414,7 @@ async function proxyRequest(req, res) {
           type: 'invalid_request_error',
           message,
         },
+        usage: { input_tokens: 0, output_tokens: 0 },
       });
     }
 
@@ -2026,6 +2453,7 @@ async function proxyRequest(req, res) {
             type: 'invalid_request_error',
             message,
           },
+          usage: { input_tokens: 0, output_tokens: 0 },
         });
       }
 
@@ -2085,7 +2513,7 @@ async function proxyRequest(req, res) {
         { event: 'content_block_start', data: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } },
         { event: 'content_block_delta', data: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' ' } } },
         { event: 'content_block_stop',  data: { type: 'content_block_stop', index: 0 } },
-        { event: 'message_delta',       data: { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } } },
+        { event: 'message_delta',       data: { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { input_tokens: 1, output_tokens: 1 } } },
         { event: 'message_stop',        data: { type: 'message_stop' } },
       ];
       events.forEach(ev => res.write(`event: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`));
@@ -2095,25 +2523,13 @@ async function proxyRequest(req, res) {
   }
 
   // ── NVIDIA NIM: proactive client-side rate limiting ───────────────────────
-  // Enforce RPM / RPD limits before the upstream request to avoid hitting the
+  // Enforce RPM limit before the upstream request to avoid hitting the
   // NVIDIA NIM quota wall and receiving a 429. The acquire() call waits
   // transparently when the per-minute bucket is full.
   if (isNvidiaNimUpstream && targetModel && targetModel !== 'unknown') {
-    const limiterResult = await nvidiaNimLimiter.acquire(targetModel);
-    if (limiterResult.blocked) {
-      const { rpdUsed, rpdLimit } = nvidiaNimLimiter.stats(targetModel);
-      const msg =
-        `NVIDIA NIM daily request limit reached for model "${targetModel}" ` +
-        `(${rpdUsed}/${rpdLimit} RPD). ` +
-        `Set NVIDIA_NIM_RPD_LIMIT env var to raise this if you have a higher-tier account.`;
-      console.warn(`[proxy] ${msg}`);
-      if (req.path.includes('/messages')) {
-        return res.status(429).json({ type: 'error', error: { type: 'rate_limit_error', message: msg } });
-      }
-      return res.status(429).json({ error: { message: msg, type: 'rate_limit_error', code: 'nvidia_nim_daily_limit' } });
-    }
-    const { rpmUsed, rpmLimit, rpdUsed, rpdLimit } = nvidiaNimLimiter.stats(targetModel);
-    console.log(`[nvidia-nim-limiter] Slot acquired for "${targetModel}" — RPM: ${rpmUsed}/${rpmLimit}, RPD: ${rpdUsed}/${rpdLimit}`);
+    await nvidiaNimLimiter.acquire(targetModel);
+    const { rpmUsed, rpmLimit } = nvidiaNimLimiter.stats(targetModel);
+    console.log(`[nvidia-nim-limiter] Slot acquired for "${targetModel}" — RPM: ${rpmUsed}/${rpmLimit}`);
   }
 
   try {
@@ -2144,6 +2560,12 @@ async function proxyRequest(req, res) {
       const err = new Error(body);
       err.response = { status: upstreamRes.status, data: body };
       throw err;
+    }
+
+    // FreeModel: log errors immediately before streaming starts
+    // This ensures errors are captured even if the stream fails mid-response
+    if (upstreamRes.status >= 400 && isFreeModelProvider(baseUrl)) {
+      console.warn(`[proxy] FreeModel error: ${upstreamRes.status}`);
     }
 
 
@@ -2254,8 +2676,23 @@ async function proxyRequest(req, res) {
 
                   // NVIDIA NIM / Kimi: intercept tool-call special tokens that arrive
                   // as plain content text instead of in the tool_calls delta array.
+                  // Also strip Kimi-internal special tokens (e.g. <|Memory|>, <|im_start|>)
+                  // that leak into delta.content — these are model-internal context markers
+                  // and must never be rendered as user-visible text.
                   if (isNvidiaNimUpstream && deltaText) {
-                    kimiTextBuffer += deltaText;
+                    // Strip any <|...|> special tokens that are NOT tool-call section markers.
+                    // Tool-call markers are preserved so parseKimiToolCallTokens() can handle them.
+                    const KIMI_TOOL_MARKERS = [
+                      '<|tool_calls_section_begin|>',
+                      '<|tool_calls_section_end|>',
+                      '<|tool_call_begin|>',
+                      '<|tool_call_argument_begin|>',
+                      '<|tool_call_end|>',
+                    ];
+                    const cleanedDeltaText = deltaText.replace(/<\|[^|]+\|>/g, (token) =>
+                      KIMI_TOOL_MARKERS.includes(token) ? token : ''
+                    );
+                    kimiTextBuffer += cleanedDeltaText;
 
                     if (kimiTextBuffer.includes('<|tool_calls_section_begin|>')) {
                       // Hold text until the closing marker arrives
@@ -2334,7 +2771,14 @@ async function proxyRequest(req, res) {
       }
 
       if (anthropicTranslator) {
-        anthropicTranslator.finish();
+        anthropicTranslator.finish('end_turn', capturedUsage);
+      }
+
+      // FreeModel: ensure logging happens even for streaming responses
+      // that may not trigger the normal error paths
+      const isFreeModel = isFreeModelProvider(baseUrl);
+      if (isFreeModel && upstreamRes.status >= 400) {
+        console.warn(`[proxy] FreeModel streaming error: ${upstreamRes.status}`);
       }
 
       let bufferedBody = null;
@@ -2371,6 +2815,17 @@ async function proxyRequest(req, res) {
               // console.log('[proxy] Translating non-streaming OpenAI response to Anthropic format');
               const translated = translateOpenAIToAnthropic(parsed, requestedModel);
               finalBody = JSON.stringify(translated);
+            } else {
+              // Ensure usage exists even if not translated
+              const parsedFinal = JSON.parse(finalBody);
+              if (parsedFinal && !parsedFinal.usage) {
+                const usage = normalizeTokenUsage(parsedFinal);
+                parsedFinal.usage = {
+                  input_tokens: usage.promptTokens || 0,
+                  output_tokens: usage.completionTokens || 0,
+                };
+                finalBody = JSON.stringify(parsedFinal);
+              }
             }
           } catch (e) {
             console.error('[proxy] Failed to translate non-streaming response:', e.message);
@@ -2425,6 +2880,11 @@ async function proxyRequest(req, res) {
     });
 
     upstreamRes.data.on('error', async (err) => {
+      // 'aborted' means the client closed the connection before the upstream finished —
+      // this is normal (Ctrl+C, tab close, CLI cancellation) and not a real server error.
+      if (err.message === 'aborted' || err.code === 'ECONNRESET') {
+        return; // client disconnected mid-stream — expected, no logging needed
+      }
       console.error('[proxy] Stream error:', err.message);
       await addLog({
         method: req.method,
@@ -2445,7 +2905,8 @@ async function proxyRequest(req, res) {
             error: {
               type: "api_error",
               message: err.message
-            }
+            },
+            usage: { input_tokens: 0, output_tokens: 0 }
           });
         } else {
           res.status(500).json({
@@ -2458,7 +2919,11 @@ async function proxyRequest(req, res) {
         }
       } else {
         if (isStreaming && req.path.includes('/messages')) {
-          res.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "api_error", message: err.message } })}\n\n`);
+          res.write(`event: error\ndata: ${JSON.stringify({
+            type: "error",
+            error: { type: "api_error", message: err.message },
+            usage: { input_tokens: 0, output_tokens: 0 },
+          })}\n\n`);
         }
         res.end();
       }
@@ -2519,7 +2984,17 @@ async function proxyRequest(req, res) {
       // Keep original message if it's not JSON
     }
 
-    console.error(`[proxy] Upstream request failed (${status}): ${String(message).slice(0, 1200)}`);
+    const currentProvider = activeProvider?.id
+      ? activeProvider
+      : eligibleProviders.find(
+          p => normalizeBaseUrlForMatch(p.baseUrl) && normalizeBaseUrlForMatch(baseUrl) === normalizeBaseUrlForMatch(p.baseUrl)
+        ) || activeProvider;
+
+    if (isFreeModelProvider(baseUrl)) {
+      console.warn(`[proxy] FreeModel upstream status ${status}: ${compactUpstreamErrorText(message || rawUpstreamMessage)}`);
+    } else {
+      console.error(`[proxy] Upstream request failed (${status}): ${String(message).slice(0, 1200)}`);
+    }
 
     const isNvidiaNimDictHashError =
       isNvidiaNimUpstream &&
@@ -2595,38 +3070,84 @@ async function proxyRequest(req, res) {
       /model_not_found|model_not_available|model.+not found|model.+not available/i.test(rawUpstreamMessage))) ||
       (status === 500 && /sensitive words detected/i.test(message));
 
-    // 0. Rate Limit Failover: Switch to next API key if available
+    const keyFailoverResult = await retryWithNextProviderApiKey(req, res, currentProvider, apiKey, {
+      status,
+      message,
+      rawUpstreamMessage,
+      upstreamErrorCode,
+      err,
+    });
+    if (keyFailoverResult) return keyFailoverResult;
+
+    // 0. Rate Limit Failover: Provider-specific handling after same-provider keys are exhausted.
     if (status === 429) {
-      const currentProvider = eligibleProviders.find(p => p.baseUrl && (baseUrl.replace(/\/+$/, '') === p.baseUrl.replace(/\/+$/, ''))) || activeProvider;
+      if (isFreeModelProvider(currentProvider) || isFreeModelProvider(baseUrl)) {
+        req.__freeModelRateLimitRetries = req.__freeModelRateLimitRetries || 0;
+        if (req.__freeModelRateLimitRetries < FREEMODEL_RATE_LIMIT_MAX_RETRIES && canRetry(req)) {
+          req.__freeModelRateLimitRetries++;
+          const waitMs = getRateLimitWaitMs(retryAfterRaw);
+          console.warn(
+            `[proxy] FreeModel rate limit (429); waiting ${Math.round(waitMs / 1000)}s then retrying ` +
+            `(${req.__freeModelRateLimitRetries}/${FREEMODEL_RATE_LIMIT_MAX_RETRIES})${retryAfterRaw ? '' : ' (no retry-after header)'}${attemptLabel(req)}`
+          );
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          return proxyRequest(req, res);
+        }
+
+        if (!canRetry(req)) {
+          console.warn(`[proxy] FreeModel rate-limit retry skipped: attempt budget exhausted${attemptLabel(req)}`);
+        } else {
+          console.warn(`[proxy] FreeModel rate limit (429); retry limit reached.`);
+        }
+        await addLog({
+          method: req.method,
+          path: req.path,
+          model: targetModel,
+          status,
+          latencyMs: Date.now() - startTime,
+          streaming: isStreaming,
+          provider: providerName,
+          error: 'FreeModel rate limited',
+          optimization: optimizationMeta,
+          performance: timing,
+        }, userId, accessKey);
+        return sendFreeModelRateLimitError(req, res);
+      }
+
       const currentProviderIsNvidiaNim = req.__upstreamProviderIsNvidiaNim === true ||
         req.__startedOnNvidiaNim === true ||
         isNvidiaNimProvider(currentProvider) ||
         isNvidiaNimValue(providerName) ||
         isNvidiaNimValue(baseUrl);
-      if (!currentProvider?.id) {
-        console.warn('[proxy] Rate limit handling skipped: no current provider context available.');
-      } else {
-        if (!req.__triedKeys) req.__triedKeys = {};
-        if (!req.__triedKeys[currentProvider.id]) req.__triedKeys[currentProvider.id] = new Set();
-        req.__triedKeys[currentProvider.id].add(apiKey);
-
-        const nextKey = currentProvider.apiKeys?.find(k => !req.__triedKeys[currentProvider.id].has(k));
-        if (nextKey) {
-          if (!canRetry(req)) {
-            console.warn(`[proxy] Rate-limit key-rotation retry skipped: attempt budget exhausted${attemptLabel(req)}`);
-            return sendAttemptBudgetExhausted(req, res);
-          } else {
-            const maskedNextKey = `${nextKey.slice(0, 8)}...${nextKey.slice(-4)}`;
-            console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; retrying with next API key: ${maskedNextKey}${attemptLabel(req)}`);
-            return proxyRequest(req, res);
-          }
-        }
-        console.warn(`[proxy] Rate limit (429) on ${currentProvider.name}; no more keys available.`);
-      }
 
       if (req.__fixedModelRouteProviderId) {
         console.warn(
           `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; fixed model route "${req.__fixedModelRouteKey}" is enabled, so provider fallback is skipped.`
+        );
+      } else if (req.__modelRoute && !req.__modelRoute.legacyFixed) {
+        if (!req.__triedProviders) req.__triedProviders = new Set();
+        if (currentProvider?.id) req.__triedProviders.add(currentProvider.id);
+
+        const currentModelForFallback = req.body?.model || targetModel;
+        const nextProvider = getNextRouteProvider(req, currentProvider?.id);
+        if (nextProvider && providerCanPreserveModelForRateLimitFallback(nextProvider, currentModelForFallback)) {
+          if (!canRetry(req)) {
+            console.warn(`[proxy] Route provider fallback skipped: attempt budget exhausted${attemptLabel(req)}`);
+            return sendAttemptBudgetExhausted(req, res);
+          }
+          console.warn(
+            `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; ` +
+            `retrying route "${req.__modelRoute.key}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
+          );
+          req.__currentProviderId = nextProvider.id;
+          req.__sameProviderKeyFailoverExhausted = false;
+          req.__skipModelMappingForRateLimitFallback = true;
+          if (req.body && currentModelForFallback) req.body.model = currentModelForFallback;
+          return proxyRequest(req, res);
+        }
+
+        console.warn(
+          `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; no route fallback provider remains for "${req.__modelRoute.key}".`
         );
       } else if (strictProviderRouting) {
         console.warn(
@@ -2653,6 +3174,10 @@ async function proxyRequest(req, res) {
             `[proxy] Rate limit (429) on NVIDIA NIM; already retried once, giving up for model "${req.body?.model || targetModel}".`
           );
         }
+      } else if (req.__sameProviderKeyFailoverExhausted) {
+        console.warn(
+          `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; same-provider API keys are exhausted, so provider fallback is skipped.`
+        );
       } else {
         if (!req.__triedProviders) req.__triedProviders = new Set();
         if (currentProvider?.id) req.__triedProviders.add(currentProvider.id);
@@ -2688,6 +3213,32 @@ async function proxyRequest(req, res) {
       }
     }
 
+    if (req.__modelRoute && !req.__modelRoute.legacyFixed && shouldRouteFailover(status, err, isModelUnavailable)) {
+      if (!req.__triedProviders) req.__triedProviders = new Set();
+      const failedProvider = upstreamProvider || activeProvider || currentProvider;
+      if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
+
+      const nextProvider = getNextRouteProvider(req, failedProvider?.id);
+      if (nextProvider) {
+        if (!canRetry(req)) {
+          console.warn(`[proxy] Route provider fallback skipped: attempt budget exhausted${attemptLabel(req)}`);
+          return sendAttemptBudgetExhausted(req, res);
+        }
+
+        console.warn(
+          `[proxy] Provider error (${status}) on ${failedProvider?.name || providerName}; ` +
+          `retrying route "${req.__modelRoute.key}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
+        );
+        req.__currentProviderId = nextProvider.id;
+        req.__sameProviderKeyFailoverExhausted = false;
+        return proxyRequest(req, res);
+      }
+
+      console.warn(
+        `[proxy] Provider error (${status}) on ${failedProvider?.name || providerName}; no route fallback provider remains for "${req.__modelRoute.key}".`
+      );
+    }
+
     if (isModelUnavailable && req.body && req.body.model) {
       const blockedModel = req.body.model;
 
@@ -2702,7 +3253,7 @@ async function proxyRequest(req, res) {
         isNvidiaNimValue(providerName) ||
         isNvidiaNimValue(baseUrl);
 
-      const nextProvider = (req.__fixedModelRouteProviderId || strictProviderRouting || isNvidiaNim)
+      const nextProvider = (req.__fixedModelRouteProviderId || strictProviderRouting || isNvidiaNim || req.__sameProviderKeyFailoverExhausted)
         ? null
         : eligibleProviders.find((p) => {
             const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
@@ -2758,7 +3309,8 @@ async function proxyRequest(req, res) {
           error: {
             type: "api_error",
             message: descriptiveMessage
-          }
+          },
+          usage: { input_tokens: 0, output_tokens: 0 }
         });
       } else {
         res.status(status).json({
@@ -2771,11 +3323,15 @@ async function proxyRequest(req, res) {
       }
     } else {
       if (isStreaming && req.path.includes('/messages')) {
-        res.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "api_error", message: message } })}\n\n`);
+        res.write(`event: error\ndata: ${JSON.stringify({
+          type: "error",
+          error: { type: "api_error", message: message },
+          usage: { input_tokens: 0, output_tokens: 0 },
+        })}\n\n`);
       }
       res.end();
     }
   }
 }
 
-module.exports = { proxyRequest };
+module.exports = { proxyRequest, warmupNvidiaNimConnection };

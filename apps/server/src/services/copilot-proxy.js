@@ -371,7 +371,7 @@ class AnthropicSSETranslator {
     this.write('message_delta', {
       type: 'message_delta',
       delta: { stop_reason: finalStopReason, stop_sequence: null },
-      usage: { output_tokens: 0 },
+      usage: { input_tokens: 0, output_tokens: 0 },
     });
     this.write('message_stop', { type: 'message_stop' });
   }
@@ -382,6 +382,7 @@ function writeAnthropicError(res, statusCode, message) {
     res.write(`event: error\ndata: ${JSON.stringify({
       type: 'error',
       error: { type: 'api_error', message },
+      usage: { input_tokens: 0, output_tokens: 0 },
     })}\n\n`);
     return res.end();
   }
@@ -389,7 +390,18 @@ function writeAnthropicError(res, statusCode, message) {
   return res.status(statusCode).json({
     type: 'error',
     error: { type: 'api_error', message },
+    usage: { input_tokens: 0, output_tokens: 0 },
   });
+}
+
+function extractErrorMessage(data, fallback) {
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data && typeof data === 'object') {
+    if (typeof data.error?.message === 'string') return data.error.message;
+    if (typeof data.error === 'string') return data.error;
+    if (typeof data.message === 'string') return data.message;
+  }
+  return fallback;
 }
 
 // ── Core proxy function ────────────────────────────────────────────────────────
@@ -633,13 +645,21 @@ async function handleMessages(req, res) {
         upstream.end();
       });
 
+      if (result.status >= 400) {
+        return writeAnthropicError(
+          res,
+          result.status,
+          extractErrorMessage(result.data, `Copilot upstream returned ${result.status}`)
+        );
+      }
+
       const anthropicResp = openAIToAnthropic(result.data, originalModel);
       res.status(result.status).json(anthropicResp);
     }
   } catch (err) {
     console.error('[copilot-proxy] /messages error:', err.message);
     if (!res.headersSent) {
-      res.status(502).json({ error: 'Copilot upstream error', message: err.message });
+      writeAnthropicError(res, 502, `Copilot upstream error: ${err.message}`);
     }
   }
 }

@@ -1,5 +1,5 @@
 /**
- * logger.js — Request / Response Logger (MongoDB version)
+ * logger.js — Request / Response Logger (JSONL file-based version)
  */
 
 const { EventEmitter } = require('events');
@@ -113,6 +113,10 @@ async function addLog(entry, userId, accessKey) {
   if (_io) {
     _io.to(`user_${uIdStr}`).emit('new_log', plainRecord);
     _io.to('admin_room').emit('new_log', plainRecord);
+    // No-DB guest mode: also broadcast globally so dashboard always sees logs
+    if (uIdStr === '000000000000000000000000') {
+      _io.emit('new_log', plainRecord);
+    }
   }
 
   // Brodcast to local event listeners
