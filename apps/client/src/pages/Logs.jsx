@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { io } from 'socket.io-client';
 import LogTable from '../components/common/LogTable';
 import LiveConsole from '../components/common/LiveConsole';
 import ConfirmationModal from '../components/common/ConfirmationModal';
@@ -18,7 +18,9 @@ import {
   Table,
   Terminal as TerminalIcon,
 } from 'lucide-react';
-import { fetchLogs, clearLogs as apiClearLogs } from '../api';
+import { clearLogs as apiClearLogs } from '../api';
+import { queryKeys } from '../api/queryKeys';
+import { useLiveLogs } from '../context/LiveLogsContext';
 import { getTokenTotal } from '../utils/tokenUsage';
 
 const PANEL_STYLE = {
@@ -26,65 +28,36 @@ const PANEL_STYLE = {
   border: '1px solid var(--color-glass-border)',
 };
 
-const PAGE_SIZES = [25, 50, 100, 200];
-
-const Logs = ({ user }) => {
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+const PAGE_SIZES = [10, 25, 50, 100, 200];
+const Logs = ({ user, onModalVisibilityChange }) => {
+  const { logs, connectionStatus, clearLiveLogs } = useLiveLogs();
+  const queryClient = useQueryClient();
+  const clearLogsMutation = useMutation({
+    mutationFn: apiClearLogs,
+    onSuccess: () => {
+      clearLiveLogs();
+      queryClient.setQueryData(queryKeys.logs({ limit: 10 }), []);
+      queryClient.invalidateQueries({ queryKey: ['logs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.status() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.modelDistribution() });
+    },
+  });
+  const [loading] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  const [connectionStatus, setConnectionStatus] = useState('connecting');
-  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
+  const [pageSize, setPageSize] = useState(10);
   const [viewMode, setViewMode] = useState('table');
   const [autoScroll, setAutoScroll] = useState(true);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const socketRef = useRef(null);
-
-  const loadLogs = useCallback(async () => {
-    try {
-      const data = await fetchLogs({ limit: 200 });
-      // Support both array response and object { logs: [], total: 0 }
-      setLogs(Array.isArray(data) ? data : data?.logs || []);
-    } catch (e) {
-      console.error('Failed to fetch logs:', e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadLogs(); }, [loadLogs]);
 
   useEffect(() => {
-    const socket = io({ transports: ['websocket', 'polling'] });
-    socketRef.current = socket;
-    socket.on('connect', () => {
-      setConnectionStatus('connected');
-      setHasConnectedOnce(true);
-      if (user?._id) {
-        socket.emit('join', user._id.toString());
-      }
-    });
-    socket.on('connect_error', () => {
-      setConnectionStatus((status) => (status === 'connected' ? 'connecting' : status));
-    });
-    socket.io.on('reconnect_attempt', () => setConnectionStatus('connecting'));
-    socket.io.on('reconnect', () => {
-      setConnectionStatus('connected');
-      setHasConnectedOnce(true);
-    });
-    socket.io.on('reconnect_failed', () => setConnectionStatus('offline'));
-    socket.on('disconnect', (reason) => {
-      setConnectionStatus(reason === 'io server disconnect' ? 'offline' : 'connecting');
-    });
-    socket.on('new_log',      (entry) => setLogs((prev) => [entry, ...prev].slice(0, 500)));
-    socket.on('logs_cleared', ()      => setLogs([]));
-    return () => socket.disconnect();
-  }, [user]);
+    onModalVisibilityChange?.(isClearModalOpen);
+  }, [isClearModalOpen, onModalVisibilityChange]);
+
+  useEffect(() => () => onModalVisibilityChange?.(false), [onModalVisibilityChange]);
 
   const handleClear = async () => {
-    await apiClearLogs().catch(console.error);
-    setLogs([]);
+    await clearLogsMutation.mutateAsync().catch(console.error);
   };
 
   const handleExport = () => {
@@ -131,61 +104,7 @@ const Logs = ({ user }) => {
 
   const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.45, ease: [0.23, 1, 0.32, 1] } }) };
 
-  const isInitialConnecting = connectionStatus === 'connecting' && !hasConnectedOnce;
   const isConnected = connectionStatus === 'connected';
-
-  if (isInitialConnecting) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="flex min-h-[calc(100dvh-8rem)] items-center justify-center px-4 lg:min-h-[calc(100dvh-5.5rem)]"
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 18, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.45, ease: [0.23, 1, 0.32, 1] }}
-          className="relative w-full max-w-md overflow-hidden rounded-[--radius-xl] p-8 text-center shadow-2xl"
-          style={PANEL_STYLE}
-        >
-          <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: 'var(--gradient-neon)', opacity: 0.65 }} />
-          <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
-              className="absolute inset-0 rounded-full border border-transparent border-t-[--color-accent-blue] border-r-[--color-accent-purple]"
-            />
-            <motion.div
-              animate={{ scale: [1, 1.12, 1], opacity: [0.32, 0.6, 0.32] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute h-16 w-16 rounded-full"
-              style={{ background: 'rgba(99,102,241,0.16)' }}
-            />
-            <TerminalIcon size={28} className="relative text-[--color-accent-blue]" />
-          </div>
-          <p className="mb-3 text-xs font-black uppercase tracking-[0.28em] text-[--color-text-tertiary]">
-            Live Stream
-          </p>
-          <h1 className="text-2xl font-black tracking-tight text-[--color-text-primary]">
-            Connecting to live request stream...
-          </h1>
-          <p className="mt-3 text-sm font-semibold text-[--color-text-secondary]">
-            Preparing real-time logs for this proxy instance.
-          </p>
-          <div className="mt-6 flex justify-center gap-1.5">
-            {[0, 1, 2].map((dot) => (
-              <motion.span
-                key={dot}
-                animate={{ opacity: [0.25, 1, 0.25], y: [0, -4, 0] }}
-                transition={{ duration: 1, repeat: Infinity, delay: dot * 0.16 }}
-                className="h-2 w-2 rounded-full bg-[--color-accent-blue]"
-              />
-            ))}
-          </div>
-        </motion.div>
-      </motion.div>
-    );
-  }
 
   return (
     <motion.div
@@ -286,7 +205,12 @@ const Logs = ({ user }) => {
 
           <div
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest"
-            style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-tertiary)' }}
+            style={{
+              background: 'rgba(34,211,238,0.11)',
+              border: '1px solid rgba(34,211,238,0.28)',
+              color: '#e0faff',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+            }}
           >
             {filtered.length} entries
           </div>

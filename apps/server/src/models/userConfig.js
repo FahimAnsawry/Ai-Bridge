@@ -8,7 +8,7 @@ const userConfigSchema = new mongoose.Schema({
   activeProviderId: String,
   activeModelId: String,
   requestMinimizationEnabled: { type: Boolean, default: true },
-  chatMaxUpstreamAttempts: { type: Number, default: 4 },
+  chatMaxUpstreamAttempts: { type: Number, default: 30 },
   tokenOptimizationEnabled: { type: Boolean, default: false },
   promptBudgetTokens: { type: Number, default: 0 },
   tokenSummarizationEnabled: { type: Boolean, default: false },

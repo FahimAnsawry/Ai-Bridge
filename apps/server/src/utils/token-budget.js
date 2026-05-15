@@ -313,6 +313,7 @@ function storeCachedResponse(cache, key, value, ttlMs, maxEntries = 200) {
 }
 
 module.exports = {
+  estimateTextTokens,
   estimatePromptTokens,
   pruneMessagesToBudget,
   summarizeMessagesToBudget,

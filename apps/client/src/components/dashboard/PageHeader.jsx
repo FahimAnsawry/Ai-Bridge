@@ -56,7 +56,7 @@ const PageHeader = ({ isConnected, onRefresh, endpoint, onCopy, copied, isRefres
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            animation: 'shimmer 5s linear infinite',
+            animation: 'text-gradient-shift 5s linear infinite',
           }}
         >
           Overview
@@ -103,33 +103,6 @@ const PageHeader = ({ isConnected, onRefresh, endpoint, onCopy, copied, isRefres
           </svg>
           {isConnected ? 'Server Online' : 'Server Offline'}
         </div>
-
-        <LiveClock />
-
-        <motion.button
-          whileHover={{ rotate: 180, scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          transition={{ duration: 0.35 }}
-          onClick={() => onRefresh?.()}
-          disabled={isRefreshing}
-          title="Refresh"
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-[--color-glass-border] bg-[--color-bg-elevated] text-[--color-text-tertiary] transition-all"
-          style={{ boxShadow: '0 0 0 0 rgba(99,102,241,0)' }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)';
-            e.currentTarget.style.boxShadow = '0 0 16px rgba(99,102,241,0.25)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'var(--color-glass-border)';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        >
-          <RefreshCw
-            size={15}
-            className={isRefreshing ? 'animate-spin' : ''}
-            style={{ color: isRefreshing ? '#6366f1' : 'var(--color-text-tertiary)' }}
-          />
-        </motion.button>
 
         {endpoint && (
           <motion.div

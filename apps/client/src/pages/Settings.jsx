@@ -1,31 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2 } from 'lucide-react';
 import {
   fetchConfig,
   saveConfig,
-  fetchAuthStatus,
-  fetchModels,
   fetchCopilotAuthStatus,
   startCopilotDeviceFlow,
   pollCopilotDeviceFlow,
   logoutCopilot,
 } from '../api';
+import { queryKeys } from '../api/queryKeys';
 import { useToast } from '../context/ToastContext';
+import SettingsSkeleton from '../components/settings/SettingsSkeleton';
 
 const DEFAULT_MODELS = [
   { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
   { id: 'gpt-5.2', name: 'GPT-5.2' },
   { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex' },
   { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
-  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
-  { id: 'claude-opus-4.7', name: 'Claude Opus 4.7' },
-  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4-6', name: 'Claude Opus 4-6' },
+  { id: 'claude-opus-4-7', name: 'Claude Opus 4-7' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4-6' },
   { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
   { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
   { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen3.5 397B A17B' },
-  { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'gemini-3.1-pro', name: 'gemini-3.1-pro' },
   { id: 'z-ai/glm-5.1', name: 'GLM 5.1' },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
 
@@ -35,46 +35,82 @@ const DEFAULT_MODELS = [
   { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
   { id: 'qwen3.5-397b-a17b', name: 'qwen3.5-397b-a17b' },
   { id: 'qwen3.5-122b-a10b', name: 'Qwen3.5 122B' },
+  { id: 'qwen3.6-plus', name: 'Qwen3.6 Plus' },
+  { id: 'qwen3.6-plus-thinking', name: 'Qwen3.6 Plus Thinking' },
+  { id: 'qwen3.6-max-preview', name: 'Qwen3.6 Max Preview' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
   { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
-  { id: 'gpt-5.5', name: 'GPT-5.5' },
-  // NVIDIA Recommended
-  { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-  { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro' },
-  { id: 'deepseek-ai/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-  { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen3.5 397B A17B' },
-  { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B A35B Instruct' },
-  { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
-  { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
-  { id: 'z-ai/glm-5.1', name: 'GLM 5.1' },
-  { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct' },
-  { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama 3.1 Nemotron 70B Instruct' }
+  { id: 'gpt-5.5', name: 'GPT-5.5' }
 ];
+
+const GLASS_STYLE = {
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.045) 100%)',
+  backdropFilter: 'blur(22px)',
+  border: '1px solid rgba(255,255,255,0.22)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 18px 48px rgba(11,8,38,0.26)',
+};
+
+const SETTINGS_CARD_THEMES = {
+  activeModel: {
+    background: 'linear-gradient(135deg, #172554 0%, #312e81 52%, #1e1b4b 100%)',
+    border: '1px solid rgba(255,255,255,0.28)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 18px 48px rgba(15,23,42,0.45)',
+  },
+  todayTokens: {
+    background: 'linear-gradient(135deg, #064e3b 0%, #115e59 48%, #164e63 100%)',
+    border: '1px solid rgba(255,255,255,0.28)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 18px 48px rgba(6,78,59,0.4)',
+  },
+  addProvider: {
+    background: 'linear-gradient(145deg, #08111f 0%, #172554 48%, #0c4a6e 100%)',
+    border: '1px solid rgba(125,211,252,0.34)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 24px 64px rgba(2,6,23,0.58), 0 0 42px rgba(56,189,248,0.16)',
+  },
+  editProvider: {
+    background: 'linear-gradient(145deg, #06141f 0%, #0f2f36 46%, #111827 100%)',
+    border: '1px solid rgba(167,243,208,0.28)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 24px 64px rgba(2,6,23,0.58), 0 0 42px rgba(20,184,166,0.14)',
+  },
+};
+
+const SOFT_PANEL = 'rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]';
+const SETTINGS_LABEL = 'text-[10px] font-extrabold uppercase tracking-[0.2em] text-white';
+const FIELD_CLASS = 'w-full rounded-xl border border-white/25 bg-slate-950/45 px-4 py-2.5 text-xs font-semibold text-white placeholder:text-white/68 outline-none [color-scheme:dark] focus:border-white/55 focus:bg-slate-950/60 disabled:cursor-not-allowed disabled:opacity-60';
+const KEY_PREVIEW_CLASS = 'min-h-10 flex-1 rounded-xl border border-white/30 bg-slate-950/60 px-4 py-2.5 font-mono text-xs font-extrabold tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]';
+const ICON_BUTTON = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white/85 hover:bg-slate-950/55 hover:text-white disabled:cursor-not-allowed disabled:opacity-50';
+const REMOVE_KEY_BUTTON = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-300/35 bg-rose-950/35 text-rose-100 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer';
+const PRIMARY_BUTTON = 'inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/30 bg-slate-950/35 px-5 py-2.5 text-[11px] font-extrabold uppercase tracking-wider text-white hover:bg-slate-950/50 disabled:cursor-not-allowed disabled:opacity-60';
+const SECONDARY_BUTTON = 'rounded-xl border border-white/25 bg-slate-950/30 px-4 py-2.5 text-xs font-extrabold text-white/85 hover:bg-slate-950/45 hover:text-white';
+const ROUTES_BUTTON = 'inline-flex items-center gap-1.5 rounded-full border border-cyan-200/45 bg-cyan-300/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-cyan-50 shadow-[0_0_18px_-8px_rgba(34,211,238,0.95)] hover:border-cyan-100/70 hover:bg-cyan-300/25 hover:text-white hover:shadow-[0_0_24px_-7px_rgba(45,212,191,1)] transition-all';
+const FALLBACK_SELECT = 'w-full appearance-none rounded-xl border border-cyan-200/40 bg-cyan-950/55 px-3.5 py-2.5 pr-9 text-[10px] font-extrabold uppercase tracking-[0.12em] text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_24px_rgba(8,47,73,0.22)] [color-scheme:dark] hover:border-cyan-100/60 hover:bg-cyan-900/60 focus:border-cyan-100 focus:bg-cyan-950/70 focus:outline-none';
+const FALLBACK_OPTION = 'bg-cyan-950 text-cyan-50';
 
 // ── GitHub Copilot Auth Card ───────────────────────────────────────────────────
 function CopilotAuthCard({
   onConnected,
 }) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
-  const [status, setStatus] = useState(null);   // auth status from server
-  const [loading, setLoading] = useState(true);
   const [flowState, setFlowState] = useState(null);   // active device flow info
   const [polling, setPolling] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const pollTimer = useRef(null);
-
-  const refresh = async () => {
-    const s = await fetchCopilotAuthStatus().catch(() => null);
-    setStatus(s);
-    setLoading(false);
-  };
+  const statusQuery = useQuery({
+    queryKey: queryKeys.copilotAuthStatus(),
+    queryFn: fetchCopilotAuthStatus,
+    staleTime: 15_000,
+  });
+  const startFlowMutation = useMutation({ mutationFn: startCopilotDeviceFlow });
+  const pollFlowMutation = useMutation({ mutationFn: pollCopilotDeviceFlow });
+  const logoutMutation = useMutation({
+    mutationFn: logoutCopilot,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.copilotAuthStatus() }),
+  });
 
   useEffect(() => {
-    refresh();
     return () => clearTimeout(pollTimer.current);
   }, []);
 
@@ -87,7 +123,7 @@ function CopilotAuthCard({
   const finalizeConnected = async () => {
     await onConnected?.();
     showToast('GitHub Copilot connected!', 'success');
-    await refresh();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.copilotAuthStatus() });
   };
 
   const handleDevicePollResult = async (poll, fallbackIntervalSeconds) => {
@@ -104,7 +140,7 @@ function CopilotAuthCard({
       stopPolling();
       setFlowState(null);
       showToast(`Copilot token error: ${poll.error || 'GitHub authorization succeeded, but Copilot token exchange failed.'}`, 'error');
-      refresh();
+      queryClient.invalidateQueries({ queryKey: queryKeys.copilotAuthStatus() });
       return null;
     }
 
@@ -140,16 +176,15 @@ function CopilotAuthCard({
     clearTimeout(pollTimer.current);
     setPolling(true);
     pollTimer.current = setTimeout(async () => {
-      const poll = await pollCopilotDeviceFlow().catch(() => null);
+      const poll = await pollFlowMutation.mutateAsync().catch(() => null);
       const nextInterval = await handleDevicePollResult(poll, intervalSeconds);
       if (nextInterval) schedulePoll(nextInterval);
     }, intervalSeconds * 1000);
   };
 
   const startFlow = async () => {
-    setSubmitting(true);
     try {
-      const res = await startCopilotDeviceFlow();
+      const res = await startFlowMutation.mutateAsync();
       if (!res.success) throw new Error(res.error || 'Failed to start Device Flow');
       setFlowState(res);
       // Open GitHub device verification in a new tab
@@ -157,17 +192,14 @@ function CopilotAuthCard({
       schedulePoll(res.interval || 5);
     } catch (err) {
       showToast(err.message, 'error');
-    } finally {
-      setSubmitting(false);
     }
   };
 
   const handleLogout = async () => {
-    await logoutCopilot();
+    await logoutMutation.mutateAsync();
     stopPolling();
     setFlowState(null);
     showToast('Copilot disconnected.', 'success');
-    refresh();
   };
 
   const copyCode = () => {
@@ -176,25 +208,29 @@ function CopilotAuthCard({
     showToast('Code copied!', 'success');
   };
 
+  const status = statusQuery.data;
+  const loading = statusQuery.isPending;
+  const submitting = startFlowMutation.isPending;
   const isConnected = status?.hasToken;
   const isAuthed = status?.authenticated;
 
   if (loading) return (
-    <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex items-center gap-3 text-slate-500 text-xs">
+    <div className="relative overflow-hidden rounded-2xl p-5 flex items-center gap-3 text-white/82 text-xs" style={GLASS_STYLE}>
       <Loader2 size={14} className="animate-spin" /> Loading Copilot status...
     </div>
   );
 
   return (
-    <div className={`glass border rounded-2xl p-4 space-y-3 transition-all duration-500 ${isConnected ? 'border-emerald-500/30 shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)]' : 'border-slate-800 hover:border-indigo-500/30 hover:shadow-glow'}`}>
+    <div className="relative overflow-hidden rounded-2xl p-4 space-y-3" style={GLASS_STYLE}>
+      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 55%)' }} />
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
-        className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
+        className="relative z-10 flex w-full items-center justify-between gap-3 text-left cursor-pointer"
       >
         <div className="flex items-center gap-2.5">
-          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isConnected ? 'bg-emerald-500/15' : 'bg-slate-800'}`}>
-            <GitBranch size={16} className={isConnected ? 'text-emerald-400' : 'text-slate-400'} />
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-white/25 bg-slate-950/35">
+            <GitBranch size={16} className={isConnected ? 'text-emerald-200' : 'text-white/80'} />
           </div>
           <div>
             <h3 className="text-[13px] font-bold text-white">GitHub Copilot</h3>
@@ -202,14 +238,14 @@ function CopilotAuthCard({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest ${isConnected ? 'bg-emerald-500/15 text-emerald-400' : isAuthed ? 'bg-amber-500/15 text-amber-400' : 'bg-slate-800 text-slate-500'
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-widest ${isConnected ? 'bg-emerald-500/20 text-emerald-100' : isAuthed ? 'bg-amber-500/20 text-amber-100' : 'bg-slate-950/35 text-white'
             }`}>
             {isConnected ? 'Connected' : isAuthed ? 'Authorized' : (<><XCircle size={10} /> Not Connected</>)}
           </div>
           {isOpen ? (
-            <ChevronUp size={15} className="text-slate-500" />
+            <ChevronUp size={15} className="text-white/45" />
           ) : (
-            <ChevronDown size={15} className="text-slate-500" />
+            <ChevronDown size={15} className="text-white/45" />
           )}
         </div>
       </button>
@@ -222,27 +258,27 @@ function CopilotAuthCard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden space-y-4"
+            className="relative z-10 overflow-hidden space-y-4"
           >
             {/* Connected state */}
             {isConnected && (
               <div className="space-y-3">
-                <div className="bg-emerald-950/20 border border-emerald-800/30 rounded-xl p-3 space-y-1.5">
+                <div className={`${SOFT_PANEL} p-3 space-y-1.5`}>
                   <p className="text-[10px] text-emerald-400 font-semibold">✓ Active Proxy Endpoints</p>
-                  <div className="space-y-1 font-mono text-[9px] text-slate-400">
+                  <div className="space-y-1 font-mono text-[9px] text-white/82">
                     <div className="flex items-center justify-between">
                       <span>OpenAI format</span>
-                      <span className="text-slate-300">/copilot/v1/chat/completions</span>
+                      <span className="text-white">/copilot/v1/chat/completions</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Anthropic format</span>
-                      <span className="text-slate-300">/copilot/v1/messages</span>
+                      <span className="text-white">/copilot/v1/messages</span>
                     </div>
                   </div>
                   {status?.tokenExpiry && (
-                    <p className="text-[9px] text-slate-500 pt-0.5">
+                    <p className="text-[9px] text-white/76 pt-0.5">
                       Token expires: {new Date(status.tokenExpiry).toLocaleTimeString()}
-                      <span className="ml-1 text-slate-600">(auto-refreshes)</span>
+                      <span className="ml-1 text-white/68">(auto-refreshes)</span>
                     </p>
                   )}
                 </div>
@@ -264,7 +300,7 @@ function CopilotAuthCard({
                   id="copilot-device-flow-btn"
                   onClick={startFlow}
                   disabled={submitting}
-                  className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-500 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-400 text-white text-[11px] font-bold rounded-xl transition-all active:scale-95 shadow-[0_0_20px_-5px_rgba(99,102,241,0.5)] disabled:opacity-60 cursor-pointer uppercase tracking-wider"
+                  className={`${PRIMARY_BUTTON} cursor-pointer`}
                 >
                   {submitting ? <Loader2 size={13} className="animate-spin" /> : <GitBranch size={13} />}
                   Connect
@@ -275,18 +311,18 @@ function CopilotAuthCard({
             {/* Active Device Flow polling state */}
             {flowState && (
               <div className="space-y-3">
-                <div className="bg-indigo-950/30 border border-indigo-700/30 rounded-xl p-4 space-y-3">
+                <div className={`${SOFT_PANEL} p-4 space-y-3`}>
                   <div className="flex items-center gap-2 text-indigo-300 text-[11px] font-semibold">
                     <Loader2 size={12} className="animate-spin" />
                     Waiting for authorization...
                   </div>
                   <div>
-                    <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">Enter this code on GitHub</p>
+                    <p className="text-[9px] text-white/82 uppercase tracking-widest mb-1.5">Enter this code on GitHub</p>
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 font-mono text-xl font-bold text-white tracking-[0.3em] text-center">
+                      <div className="flex-1 rounded-lg border border-white/25 bg-slate-950/45 px-4 py-2.5 font-mono text-xl font-bold text-white tracking-[0.3em] text-center">
                         {flowState.userCode}
                       </div>
-                      <button type="button" onClick={copyCode} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer" title="Copy code">
+                      <button type="button" onClick={copyCode} className={`${ICON_BUTTON} h-11 w-11 cursor-pointer`} title="Copy code">
                         <Copy size={14} />
                       </button>
                     </div>
@@ -295,7 +331,7 @@ function CopilotAuthCard({
                     href={flowState.verificationUri}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-1.5 w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium rounded-lg transition-colors"
+                    className="flex items-center justify-center gap-1.5 w-full py-2 border border-white/25 bg-slate-950/35 text-white text-[10px] font-bold rounded-lg hover:bg-slate-950/50"
                   >
                     <ExternalLink size={11} /> Open {flowState.verificationUri}
                   </a>
@@ -304,7 +340,7 @@ function CopilotAuthCard({
                   <button
                     type="button"
                     onClick={() => { stopPolling(); setFlowState(null); }}
-                    className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                    className="text-[10px] text-white/76 hover:text-white transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -321,17 +357,92 @@ function CopilotAuthCard({
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-const Input = ({ label, type = 'text', ...props }) => {
+const mapConfigToForm = (cfg = {}, accessKey = '') => ({
+  local_api_key: cfg.local_api_key || accessKey || '',
+  active_provider_id: cfg.active_provider_id || '',
+  model_routing: cfg.model_routing && typeof cfg.model_routing === 'object' && !Array.isArray(cfg.model_routing) ? cfg.model_routing : {},
+  providers: cfg.providers || [],
+  port: cfg.port || 3000,
+  token_optimization_enabled: cfg.token_optimization_enabled === true,
+  prompt_budget_tokens: cfg.prompt_budget_tokens || 0,
+  token_summarization_enabled: cfg.token_summarization_enabled === true,
+  response_cache_enabled: cfg.response_cache_enabled === true,
+  response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
+});
+
+// Memoized ProviderCard component to prevent unnecessary re-renders
+const ProviderCard = React.memo(({ provider, routedCount, keyCount, onEdit, onRoute, onRemove }) => {
+  return (
+    <div className={`${SOFT_PANEL} group relative overflow-hidden p-4 flex flex-col gap-4`}>
+      <div className="relative z-10 flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <h4 className="font-bold text-white tracking-tight text-sm truncate">{provider.name || 'Unnamed Provider'}</h4>
+          <p className="text-[10px] text-white/60 font-mono truncate mt-0.5">{provider.baseUrl || 'No URL'}</p>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove(provider.id); }}
+          className="p-1.5 shrink-0 rounded-lg text-white/30 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      <div className="relative z-10 flex items-center gap-3">
+        <span className="inline-flex items-center gap-1 text-[10px] text-white/50">
+          <span className="w-1 h-1 rounded-full bg-emerald-400/60" />
+          Active
+        </span>
+        <span className="text-[10px] text-white/35">|</span>
+        <span className="text-[10px] text-white/50">
+          <span className="text-white/80 font-mono font-bold">{keyCount}</span> key{keyCount !== 1 ? 's' : ''}
+        </span>
+        <span className="text-[10px] text-white/35">|</span>
+        <span className="text-[10px] text-white/50">
+          <span className="text-white/80 font-mono font-bold">{routedCount}</span> route{routedCount !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div className="relative z-10 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(provider.id);
+          }}
+          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/25 bg-white/5 px-4 py-2.5 text-[11px] font-bold text-white hover:bg-white/10 hover:border-white/35 transition-all cursor-pointer"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRoute(provider.id);
+          }}
+          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2.5 text-[11px] font-bold text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/50 hover:text-cyan-100 transition-all cursor-pointer shadow-[0_0_20px_-6px_rgba(34,211,238,0.3)] hover:shadow-[0_0_28px_-4px_rgba(34,211,238,0.5)]"
+        >
+          <Route size={13} />
+          Routes
+        </button>
+      </div>
+    </div>
+  );
+});
+
+ProviderCard.displayName = 'ProviderCard';
+
+const Input = ({ label, type = 'text', className = '', ...props }) => {
   const [show, setShow] = React.useState(false);
   const isPassword = type === 'password';
   return (
     <div className="space-y-2">
-      {label && <label className="label-caps">{label}</label>}
+      {label && <label className={SETTINGS_LABEL}>{label}</label>}
       <div className="relative group">
-        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-xl blur opacity-0 group-hover:opacity-20 transition duration-500"></div>
-        <input {...props} type={isPassword ? (show ? 'text' : 'password') : type} className="relative w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all cursor-text pr-10 font-mono" />
+        <input {...props} type={isPassword ? (show ? 'text' : 'password') : type} className={`${FIELD_CLASS} cursor-text pr-10 font-mono ${className}`} />
         {isPassword && (
-          <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-2.5 text-slate-500 hover:text-indigo-400 transition-colors z-10">
+          <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-2.5 z-10 text-white/45 hover:text-white">
             {show ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>}
           </button>
         )}
@@ -340,13 +451,115 @@ const Input = ({ label, type = 'text', ...props }) => {
   );
 };
 
-const Card = ({ children, className = '' }) => (
-  <div className={`glass card-neon rounded-2xl p-6 transition-all duration-300 ${className}`}>
+const Card = ({ children, className = '', style = GLASS_STYLE }) => (
+  <div className={`relative overflow-hidden rounded-2xl p-6 ${className}`} style={style}>
+    <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 55%)' }} />
+    <div className="relative z-10 flex h-full min-h-0 flex-col">
     {children}
+    </div>
   </div>
 );
 
-const Settings = ({ user: initialUser }) => {
+const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
+  const [isKeyVisible, setIsKeyVisible] = useState(false);
+  const [copiedField, setCopiedField] = useState(null);
+  const hasAccessKey = Boolean(accessKey);
+
+  const copyValue = (field, value) => {
+    if (!value) return;
+    navigator.clipboard.writeText(value);
+    setCopiedField(field);
+    onCopy?.(`${field === 'baseUrl' ? 'Base URL' : 'Access key'} copied.`);
+    setTimeout(() => setCopiedField(null), 1800);
+  };
+
+  return (
+    <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-5 lg:p-6 overflow-hidden max-sm:h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
+      <div className="flex items-center justify-between gap-3 shrink-0">
+        <h2 className="text-lg font-bold text-white flex items-center gap-3 tracking-tight">
+          <KeyRound className="text-white/80" size={20} />
+          API Config
+        </h2>
+        <span className={`text-[10px] font-bold uppercase tracking-[0.2em] px-2.5 py-1 rounded-full border ${
+          hasAccessKey
+            ? 'text-emerald-100 bg-slate-950/35 border-white/25'
+            : 'text-amber-100 bg-slate-950/35 border-white/25'
+        }`}>
+          {hasAccessKey ? 'Ready' : 'Missing Key'}
+        </span>
+      </div>
+
+      <div className="mt-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1 space-y-4 border-t border-white/15 pt-5">
+        <div className={`${SOFT_PANEL} p-4`}>
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white">
+              <Link2 size={16} />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <label className={SETTINGS_LABEL}>Base URL</label>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-xs font-semibold text-white break-all">
+                  {baseUrl}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyValue('baseUrl', baseUrl)}
+                  className={ICON_BUTTON}
+                  title="Copy base URL"
+                >
+                  {copiedField === 'baseUrl' ? <Check size={15} /> : <Copy size={15} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={`${SOFT_PANEL} p-4`}>
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white">
+              <KeyRound size={16} />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <label className={SETTINGS_LABEL}>Access Key</label>
+              <div className="flex items-center gap-2">
+                <div className={`min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-xs break-all ${hasAccessKey ? 'font-semibold text-white' : 'font-semibold text-white/82'}`}>
+                  {hasAccessKey ? (isKeyVisible ? accessKey : '••••••••••••••••') : 'No access key available'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsKeyVisible((value) => !value)}
+                  disabled={!hasAccessKey}
+                  className={ICON_BUTTON}
+                  title={isKeyVisible ? 'Hide access key' : 'Show access key'}
+                >
+                  {isKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyValue('accessKey', accessKey)}
+                  disabled={!hasAccessKey}
+                  className={ICON_BUTTON}
+                  title="Copy access key"
+                >
+                  {copiedField === 'accessKey' ? <Check size={15} /> : <Copy size={15} />}
+                </button>
+              </div>
+              {!hasAccessKey && (
+                <p className="text-[10px] font-medium text-amber-300/80">
+                  Generate an access key from the dashboard before using the local gateway.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+
+      </div>
+    </Card>
+  );
+};
+
+const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   const [form, setForm] = useState({
     local_api_key: '',
     active_provider_id: '',
@@ -359,19 +572,34 @@ const Settings = ({ user: initialUser }) => {
     response_cache_enabled: false,
     response_cache_ttl_seconds: 30,
   });
-  const [user, setUser] = useState(initialUser);
   const [expandedIds, setExpandedIds] = useState({});
   const [editingProviderId, setEditingProviderId] = useState(null);
   const [activeRouteProviderId, setActiveRouteProviderId] = useState(null);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const modelDropdownRef = useRef(null);
-  const [loading, setLoading] = useState(true);
+  const hasHydratedConfig = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', message: '' });
   const providerListRef = useRef(null);
   const [providerScrollState, setProviderScrollState] = useState({ top: false, bottom: false });
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const configQuery = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: fetchConfig,
+    staleTime: 60_000,
+  });
+  const saveConfigMutation = useMutation({
+    mutationFn: saveConfig,
+    onSuccess: (data, updates) => {
+      queryClient.setQueryData(queryKeys.config(), (current = {}) => ({
+        ...current,
+        ...updates,
+        ...(data && typeof data === 'object' ? data : {}),
+      }));
+    },
+  });
 
   const isFreeModelProviderRecord = (provider) => {
     const value = `${provider?.id || ''} ${provider?.name || ''} ${provider?.baseUrl || ''}`.toLowerCase();
@@ -410,7 +638,7 @@ const Settings = ({ user: initialUser }) => {
 
     setSaveStatus({ state: 'saving', message: 'Saving changes...' });
     try {
-      await saveConfig(updates);
+      await saveConfigMutation.mutateAsync(updates);
       setSaveStatus({ state: 'saved', message: 'Saved' });
       if (options.successMessage) showToast(options.successMessage, 'success');
       return true;
@@ -442,48 +670,20 @@ const Settings = ({ user: initialUser }) => {
     });
   };
 
-  const [availableModels, setAvailableModels] = useState([]);
+  const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
 
   useEffect(() => {
-    Promise.all([fetchConfig(), fetchAuthStatus(), fetchModels()])
-      .then(([cfg, authData, modelsRes]) => {
-        setForm({
-          local_api_key: cfg.local_api_key || authData.user?.accessKey || '',
-          active_provider_id: cfg.active_provider_id || '',
-          model_routing: cfg.model_routing && typeof cfg.model_routing === 'object' && !Array.isArray(cfg.model_routing) ? cfg.model_routing : {},
-          providers: cfg.providers || [],
-          port: cfg.port || 3000,
-          token_optimization_enabled: cfg.token_optimization_enabled === true,
-          prompt_budget_tokens: cfg.prompt_budget_tokens || 0,
-          token_summarization_enabled: cfg.token_summarization_enabled === true,
-          response_cache_enabled: cfg.response_cache_enabled === true,
-          response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
-        });
-        setUser(authData.user);
-        
-        // Merge fetched models with DEFAULT_MODELS
-        const fetched = modelsRes && modelsRes.data ? modelsRes.data : [];
-        const combined = [...fetched];
-        if (typeof DEFAULT_MODELS !== 'undefined') {
-          DEFAULT_MODELS.forEach(dm => {
-            if (!combined.find(m => m.id === dm.id)) {
-              combined.push({ id: dm.id, name: dm.name });
-            }
-          });
-        }
-        setAvailableModels(combined);
-        setLoading(false);
-        setExpandedIds({});
-      })
-      .catch((err) => {
-        console.error('[Settings] Failed to load config:', err);
-        setLoading(false);
-      });
-  }, []);
+    if (!configQuery.data || hasHydratedConfig.current) return;
+    hasHydratedConfig.current = true;
+    setForm(mapConfigToForm(configQuery.data, initialUser?.accessKey));
+    setAvailableModels(DEFAULT_MODELS);
+    setExpandedIds({});
+  }, [configQuery.data, initialUser?.accessKey]);
 
   useEffect(() => {
+    // Only update scroll state when provider count changes, not on every state change
     requestAnimationFrame(updateProviderScrollState);
-  }, [loading, form.providers, expandedIds]);
+  }, [form.providers.length]);
 
   const handleSave = async (e) => {
     e.preventDefault(); setSaving(true);
@@ -495,6 +695,12 @@ const Settings = ({ user: initialUser }) => {
 
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [newProviderForm, setNewProviderForm] = React.useState({ name: '', baseUrl: '', apiKey: '' });
+
+  useEffect(() => {
+    onModalVisibilityChange?.(Boolean(isAddModalOpen || editingProviderId || activeRouteProviderId));
+  }, [activeRouteProviderId, editingProviderId, isAddModalOpen, onModalVisibilityChange]);
+
+  useEffect(() => () => onModalVisibilityChange?.(false), [onModalVisibilityChange]);
 
   const normalizeBaseUrl = (value) => String(value || '').replace(/\/+$/, '');
   const getModelRouting = (routing = form.model_routing) => (
@@ -680,7 +886,7 @@ const Settings = ({ user: initialUser }) => {
   };
 
   const ensureCopilotProvider = async () => {
-    const apiKey = user?.accessKey || form.local_api_key || '';
+    const apiKey = initialUser?.accessKey || form.local_api_key || '';
     if (!apiKey) {
       showToast('Bridge API key is missing. Regenerate your access key first.', 'error');
       return;
@@ -703,34 +909,59 @@ const Settings = ({ user: initialUser }) => {
     }
   };
 
-  const isPopularProvider = (provider) => {
+  const isPopularProvider = useCallback((provider) => {
     const name = provider?.name || '';
     const baseUrl = provider?.baseUrl || '';
     return provider?.id === 'copilot' || /github/i.test(name) || /\/copilot\/v1\/?$/i.test(baseUrl);
-  };
+  }, []);
 
-  const popularProviders = form.providers.filter(isPopularProvider);
-  const copilotProvider = popularProviders.find(provider => provider.id === 'copilot' || /github/i.test(provider.name || ''));
-  const otherPopularProviders = popularProviders.filter(provider => provider.id !== copilotProvider?.id);
-  const customProviders = form.providers.filter(provider => !isPopularProvider(provider));
+  // Memoize provider lists to avoid recalculating on every render
+  const { popularProviders, copilotProvider, otherPopularProviders, customProviders } = useMemo(() => {
+    const popular = form.providers.filter(isPopularProvider);
+    const copilot = popular.find(provider => provider.id === 'copilot' || /github/i.test(provider.name || ''));
+    const otherPopular = popular.filter(provider => provider.id !== copilot?.id);
+    const custom = form.providers.filter(provider => !isPopularProvider(provider));
+
+    return {
+      popularProviders: popular,
+      copilotProvider: copilot,
+      otherPopularProviders: otherPopular,
+      customProviders: custom
+    };
+  }, [form.providers, isPopularProvider]);
+
+  // Memoize route counts for all providers to avoid recalculating on every render
+  const routeCountsByProvider = useMemo(() => {
+    const routing = getModelRouting();
+    const counts = {};
+    form.providers.forEach(p => {
+      counts[p.id] = Object.values(routing).filter(
+        routeValue => routeIncludesProvider(routeValue, p.id)
+      ).length;
+    });
+    return counts;
+  }, [form.model_routing, form.providers]);
+
+  const gatewayBaseUrl = 'http://localhost:3000/v1';
+  const currentAccessKey = initialUser?.accessKey || form.local_api_key || '';
 
   const renderProviderList = (providers, emptyLabel) => {
     if (providers.length === 0) {
       return (
-        <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-slate-600">
+        <div className="rounded-xl border border-dashed border-white/25 bg-slate-950/30 px-4 py-6 text-center font-semibold text-white/82">
           <p className="text-xs font-medium">{emptyLabel}</p>
         </div>
       );
     }
 
     return providers.map(p => (
-      <div key={p.id} className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-indigo-500/30 hover:shadow-[0_0_20px_-5px_rgba(99,102,241,0.15)] group">
+      <div key={p.id} className={`${SOFT_PANEL} p-4 group`}>
         <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(p.id)}>
           <div className="flex items-center gap-3 font-bold text-white text-[13px]">
-            <div className="p-1 rounded-md bg-slate-800/50 text-indigo-400 group-hover:bg-indigo-500/20 group-hover:text-indigo-300 transition-colors">
+            <div className="p-1 rounded-md border border-white/25 bg-slate-950/35 text-white">
               {expandedIds[p.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </div>
-            <span className="truncate max-w-[120px] sm:max-w-none font-display tracking-tight text-sm">{p.name || 'Unnamed Provider'}</span>
+            <span className="truncate max-w-[120px] sm:max-w-none tracking-tight text-sm">{p.name || 'Unnamed Provider'}</span>
             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider shadow-[0_0_10px_-2px_rgba(16,185,129,0.2)]">Active</span>
           </div>
           <button type="button" onClick={(e) => { e.stopPropagation(); removeProvider(p.id); }} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
@@ -740,7 +971,7 @@ const Settings = ({ user: initialUser }) => {
 
         <AnimatePresence>
           {expandedIds[p.id] && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3 pt-3 border-t border-slate-800 space-y-3">
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3 pt-3 border-t border-white/15 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2">
                   <Input value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" />
@@ -748,22 +979,21 @@ const Settings = ({ user: initialUser }) => {
                 <Input value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" />
                 <div className="sm:col-span-2">
                   <div className="space-y-3">
-                    <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">API Keys</label>
+                    <label className={SETTINGS_LABEL}>API Keys</label>
                     <div className="space-y-2">
                       {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).map((key, idx) => (
                         <div key={idx} className="flex gap-2">
-                          <div className="flex-1 relative">
-                            <input type="password" value={key} readOnly className="w-full bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-400 focus:outline-none" />
-                            <div className="absolute right-3 top-2.5 text-[8px] text-slate-600 font-mono">{key.slice(0, 4)}...{key.slice(-4)}</div>
+                          <div className={KEY_PREVIEW_CLASS}>
+                            {key.slice(0, 6)}...{key.slice(-6)}
                           </div>
-                          <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className="p-2 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors" title="Remove Key">
+                          <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className={REMOVE_KEY_BUTTON} title="Remove Key">
                             <Trash2 size={14} />
                           </button>
                         </div>
                       ))}
                       <div className="flex gap-2">
                         <div className="flex-1">
-                          <input type="password" placeholder="Add new API key..." className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all font-mono"
+                          <input type="password" placeholder="Add new API key..." className={`${FIELD_CLASS} font-mono`}
                             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
                             onBlur={(e) => { if (e.target.value) { addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
                           />
@@ -781,54 +1011,44 @@ const Settings = ({ user: initialUser }) => {
     ));
   };
 
-  const renderProviderGrid = (providers, emptyLabel) => {
+  const renderProviderGrid = useCallback((providers, emptyLabel) => {
     if (providers.length === 0) {
       return (
-        <div className="col-span-full rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-8 text-center text-slate-600">
+        <div className="col-span-full rounded-xl border border-dashed border-white/25 bg-slate-950/30 px-4 py-8 text-center font-semibold text-white/82">
           <p className="text-xs font-medium">{emptyLabel}</p>
         </div>
       );
     }
 
-    return providers.map(p => (
-      <div 
-        key={p.id} 
-        onClick={() => setEditingProviderId(p.id)}
-        className="p-4 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-indigo-500/50 hover:shadow-[0_0_20px_-5px_rgba(99,102,241,0.25)] group cursor-pointer flex flex-col gap-3 min-h-[100px] justify-between relative overflow-hidden"
-      >
-        <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-cyan-500/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500"></div>
-        <div className="relative z-10 flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-1.5 min-w-0">
-            <span className="font-display font-bold text-white tracking-tight text-sm truncate">{p.name || 'Unnamed Provider'}</span>
-            <span className="text-[10px] text-slate-400 font-mono truncate">{p.baseUrl || 'No URL'}</span>
-          </div>
-          <button 
-            type="button" 
-            onClick={(e) => { e.stopPropagation(); removeProvider(p.id); }} 
-            className="p-1.5 shrink-0 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-        <div className="relative z-10 flex items-center justify-between mt-2 pt-2 border-t border-slate-800/50">
-          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider shadow-[0_0_10px_-2px_rgba(16,185,129,0.2)]">Active</span>
-          <div className="text-[10px] text-slate-500 font-mono">
-            {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).length} keys
-          </div>
-        </div>
-      </div>
-    ));
-  };
+    return providers.map(p => {
+      const routedCount = routeCountsByProvider[p.id] || 0;
+      const keyCount = (p.apiKeys || (p.apiKey ? [p.apiKey] : [])).length;
 
-  if (loading) return <div className="text-center py-20 text-slate-500">Loading Configuration...</div>;
+      return (
+        <ProviderCard
+          key={p.id}
+          provider={p}
+          routedCount={routedCount}
+          keyCount={keyCount}
+          onEdit={setEditingProviderId}
+          onRoute={setActiveRouteProviderId}
+          onRemove={removeProvider}
+        />
+      );
+    });
+  }, [routeCountsByProvider, removeProvider]);
+
+  if (configQuery.isPending) {
+    return <SettingsSkeleton />;
+  }
 
   return (
-    <div className="max-w-7xl mx-auto h-[calc(100vh-100px)] flex flex-col py-6 lg:py-8 px-6 lg:px-10 space-y-6 overflow-hidden">
-      <header className="shrink-0 space-y-2 pb-2 border-b border-slate-800/50">
+    <div className="max-w-7xl mx-auto h-[calc(100vh-165px)] max-sm:h-auto flex flex-col pt-2 lg:py-6 px-4 sm:px-6 lg:px-10 overflow-hidden max-sm:overflow-visible">
+      <header className="shrink-0 space-y-1 sm:space-y-2 pb-1 sm:pb-2 border-b border-white/15">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text text-neon-gradient tracking-tighter">System Settings</h1>
-            <p className="text-slate-400 text-sm font-medium">Configure your gateway, providers, and security.</p>
+            <h1 className="text-4xl font-extrabold tracking-tight text-white">System Settings</h1>
+            <p className="text-white/82 text-sm font-medium">Configure your gateway, providers, and security.</p>
           </div>
           {saveStatus.state !== 'idle' && (
             <div
@@ -846,127 +1066,101 @@ const Settings = ({ user: initialUser }) => {
         </div>
       </header>
 
-      <form onSubmit={handleSave} className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden pb-4 pt-2">
-        <div className="lg:col-span-6 flex flex-col min-h-0 overflow-hidden">
-          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 shadow-panel overflow-hidden">
+      <form onSubmit={handleSave} className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden max-sm:overflow-visible pb-4 pt-2 min-h-0">
+        <div className="lg:col-span-6 flex-1 flex flex-col min-h-0 overflow-hidden max-sm:min-h-0 max-sm:flex-none">
+          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 overflow-hidden max-sm:flex-none" style={SETTINGS_CARD_THEMES.activeModel}>
             <div className="flex items-center justify-between mb-5 shrink-0">
-              <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
-                <Globe className="text-indigo-400 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]" size={20} />
+              <h2 className="text-lg font-bold text-white flex items-center gap-3 tracking-tight">
+                <Globe className="text-white/80" size={20} />
                 Providers
               </h2>
             </div>
 
-            <div className="relative flex-1 min-h-0 overflow-hidden">
-              <div
-                ref={providerListRef}
-                onScroll={updateProviderScrollState}
-                className="absolute inset-0 overflow-y-auto overscroll-contain scroll-smooth space-y-3 pr-1 pb-8 custom-scrollbar"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="label-caps">Popular Providers</h3>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="sm:col-span-2">
-                      <CopilotAuthCard
-                        onConnected={ensureCopilotProvider}
-                      />
-                    </div>
-                    {otherPopularProviders.length > 0 && renderProviderGrid(otherPopularProviders)}
-                  </div>
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden max-sm:flex-none">
+              {/* Fixed top: Popular Providers */}
+              <div className="shrink-0 space-y-2 pb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className={SETTINGS_LABEL}>Popular Providers</h3>
                 </div>
-
-                <div className="space-y-3 pt-3 border-t border-slate-800/50 mt-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="label-caps">Custom Provider</h3>
-                    <button type="button" onClick={() => setIsAddModalOpen(true)} className="px-4 py-1.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-full hover:bg-indigo-500/20 hover:shadow-glow transition-all uppercase tracking-widest cursor-pointer border border-indigo-500/20">
-                      <Plus size={12} className="inline mr-1" /> Add
-                    </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <CopilotAuthCard
+                      onConnected={ensureCopilotProvider}
+                    />
                   </div>
+                  {otherPopularProviders.length > 0 && renderProviderGrid(otherPopularProviders)}
+                </div>
+              </div>
+
+              {/* Fixed: Custom Provider header */}
+              <div className="shrink-0 flex items-center justify-between gap-3 pt-3 border-t border-white/15">
+                <h3 className={SETTINGS_LABEL}>Custom Provider</h3>
+                <button type="button" onClick={() => setIsAddModalOpen(true)} className="rounded-full border border-white/25 bg-slate-950/35 px-4 py-1.5 text-[10px] font-extrabold uppercase tracking-widest text-white hover:bg-slate-950/50 cursor-pointer">
+                  <Plus size={12} className="inline mr-1" /> Add
+                </button>
+              </div>
+
+              {/* Scrollable: Custom Provider cards */}
+              <div className="relative flex-1 min-h-0 mt-3 max-sm:h-[40vh] max-sm:min-h-[200px]">
+                <div
+                  ref={providerListRef}
+                  onScroll={updateProviderScrollState}
+                  className="absolute inset-0 overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
+                >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {renderProviderGrid(customProviders, 'No custom provider configured')}
                   </div>
                 </div>
+                <div
+                  className={`pointer-events-none absolute inset-x-0 top-0 h-8 transition-opacity ${providerScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+                  style={{ background: 'linear-gradient(to bottom, rgba(15,23,42,0.92), rgba(15,23,42,0))' }}
+                />
+                <div
+                  className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 transition-opacity ${providerScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+                  style={{ background: 'linear-gradient(to top, rgba(15,23,42,0.92), rgba(15,23,42,0))' }}
+                />
               </div>
-              <div className={`pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-slate-950/95 to-transparent transition-opacity ${providerScrollState.top ? 'opacity-100' : 'opacity-0'}`} />
-              <div className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-slate-950/95 to-transparent transition-opacity ${providerScrollState.bottom ? 'opacity-100' : 'opacity-0'}`} />
             </div>
           </Card>
         </div>
 
-        <div className="lg:col-span-6 flex flex-col space-y-6 overflow-hidden min-h-0">
-          <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-5 lg:p-6 shadow-panel overflow-hidden">
-            <div className="flex items-center justify-between gap-3 shrink-0">
-              <h2 className="text-lg font-bold text-white flex items-center gap-3 font-display tracking-tight">
-                <Route className="text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" size={20} />
-                Model Routes
-              </h2>
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-500 bg-cyan-500/10 px-2.5 py-1 rounded-full border border-cyan-500/20 shadow-[0_0_10px_-2px_rgba(34,211,238,0.2)]">
-                  {Object.keys(getModelRouting()).length} Active Routes
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-4 overflow-hidden flex-1 min-h-0 flex flex-col pt-4 border-t border-slate-800/50 mt-4">
-                  <div className="relative flex-1 min-h-0">
-                    <div className="absolute inset-0 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-4 pr-1 custom-scrollbar content-start pb-4">
-                    {routeProviders.length === 0 ? (
-                      <div className="col-span-full rounded-xl border border-dashed border-slate-800/50 bg-slate-950/40 px-4 py-8 text-center text-slate-600">
-                        <p className="text-xs font-medium">No providers configured</p>
-                      </div>
-                    ) : (
-                      routeProviders.map((provider) => {
-                        const routedCount = Object.values(getModelRouting()).filter(routeValue => routeIncludesProvider(routeValue, provider.id)).length;
-
-                        return (
-                          <div
-                            key={provider.id}
-                            onClick={() => setActiveRouteProviderId(provider.id)}
-                            className="p-5 rounded-xl border transition-all duration-300 glass border-slate-800/60 hover:border-cyan-500/50 hover:shadow-[0_0_20px_-5px_rgba(34,211,238,0.25)] group cursor-pointer flex flex-col gap-4 min-h-[120px] justify-between relative overflow-hidden"
-                          >
-                            <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none"></div>
-
-                            <div className="relative z-10 flex items-start justify-between gap-3">
-                              <div className="flex flex-col gap-1.5 min-w-0">
-                                <span className="font-display font-bold text-white tracking-tight text-base truncate">{provider.name || provider.id}</span>
-                                <span className="text-[11px] text-slate-400 font-mono truncate">{provider.baseUrl || 'No URL'}</span>
-                              </div>
-                            </div>
-
-                            <div className="relative z-10 flex items-center justify-between mt-auto pt-3 border-t border-slate-800/50">
-                              <div className="flex items-center gap-2">
-                                <Route size={12} className="text-cyan-500" />
-                                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-400">
-                                  {routedCount} Models Routed
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                    </div>
-                  </div>
-
-                  </div>
-          </Card>
+        <div className="lg:col-span-6 flex-1 flex flex-col space-y-6 overflow-hidden min-h-0">
+          <ApiConfigCard
+            baseUrl={gatewayBaseUrl}
+            accessKey={currentAccessKey}
+            onCopy={(message) => showToast(message, 'success')}
+          />
         </div>
       </form>
 
       <AnimatePresence>
         {isAddModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-sm glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel">
-              <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Add New Provider</h2>
-              <div className="space-y-4">
-                <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} placeholder="e.g. Local LLaMA" />
-                <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} placeholder="https://..." />
-                <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} placeholder="sk-..." />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6" style={SETTINGS_CARD_THEMES.addProvider}>
+              <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(56,189,248,0.20) 0%, rgba(255,255,255,0.05) 34%, rgba(255,255,255,0) 64%)' }} />
+              <div className="relative z-10 flex items-center justify-between gap-4 border-b border-white/15 pb-4">
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-sky-100">Provider Setup</p>
+                  <h2 className="mt-1 text-xl font-extrabold text-white">Add New Provider</h2>
+                </div>
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-slate-950/35 text-white/80 hover:bg-slate-950/55 hover:text-white cursor-pointer">
+                  <XCircle size={18} />
+                </button>
               </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 py-2.5 rounded-xl text-xs font-bold label-caps text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer">Cancel</button>
-                <button type="button" onClick={handleAddProvider} className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:from-indigo-400 hover:to-cyan-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Add Provider</button>
+              <div className="relative z-10 space-y-4 rounded-2xl border border-white/15 bg-slate-950/20 p-4">
+                <div className="space-y-2">
+                  <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} placeholder="e.g. Local LLaMA" className="break-words" />
+                </div>
+                <div className="space-y-2">
+                  <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} placeholder="https://..." className="break-all" />
+                </div>
+                <div className="space-y-2">
+                  <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} placeholder="sk-..." className="break-all" />
+                </div>
+              </div>
+              <div className="relative z-10 flex gap-3 pt-2 border-t border-white/15">
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className={`flex-1 ${SECONDARY_BUTTON} cursor-pointer`}>Cancel</button>
+                <button type="button" onClick={handleAddProvider} className={`flex-1 ${PRIMARY_BUTTON} cursor-pointer`}>Add Provider</button>
               </div>
             </motion.div>
           </motion.div>
@@ -978,50 +1172,58 @@ const Settings = ({ user: initialUser }) => {
           const p = form.providers.find(x => x.id === editingProviderId);
           if (!p) return null;
           return (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-lg glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between shrink-0">
-                <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display">Edit Provider</h2>
-                <button type="button" onClick={() => setEditingProviderId(null)} className="text-slate-400 hover:text-white cursor-pointer"><XCircle size={20}/></button>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-lg overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.editProvider}>
+              <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.18) 0%, rgba(255,255,255,0.04) 32%, rgba(255,255,255,0) 62%)' }} />
+              <div className="relative z-10 flex items-center justify-between gap-4 shrink-0 border-b border-white/15 pb-4">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-emerald-100">Provider</p>
+                  <h2 className="mt-1 truncate text-xl font-extrabold text-white">{p.name || 'Edit Provider'}</h2>
+                </div>
+                <button type="button" onClick={() => setEditingProviderId(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-slate-950/35 text-white/80 hover:bg-slate-950/55 hover:text-white cursor-pointer"><XCircle size={18}/></button>
               </div>
               
-              <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
+              <div className="relative z-10 space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
-                      <Input label="Name" value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" />
+                      <Input label="Name" value={p.name} onChange={e => updateProvider(p.id, 'name', e.target.value)} placeholder="Name" className="break-words" />
                     </div>
                     <div className="sm:col-span-2">
-                      <Input label="Base URL" value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" />
+                      <Input label="Base URL" value={p.baseUrl} onChange={e => updateProvider(p.id, 'baseUrl', e.target.value)} placeholder="Base URL" className="break-all" />
                     </div>
                     <div className="sm:col-span-2 space-y-3">
-                      <label className="label-caps">API Keys</label>
-                      <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className={SETTINGS_LABEL}>API Keys</label>
+                        <span className="rounded-full border border-emerald-200/30 bg-slate-950/40 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.16em] text-emerald-100">
+                          {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).length} saved
+                        </span>
+                      </div>
+                      <div className="space-y-2 rounded-2xl border border-white/15 bg-slate-950/25 p-3">
                         {(p.apiKeys || (p.apiKey ? [p.apiKey] : [])).map((key, idx) => (
                           <div key={idx} className="flex gap-2">
-                            <div className="flex-1 relative">
-                              <input type="password" value={key} readOnly className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-400 focus:outline-none font-mono" />
-                              <div className="absolute right-3 top-2.5 text-[10px] text-slate-500 font-mono">{key.slice(0, 4)}...{key.slice(-4)}</div>
+                            <div className={KEY_PREVIEW_CLASS}>
+                              {key.slice(0, 6)}...{key.slice(-6)}
                             </div>
-                            <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer" title="Remove Key">
+                            <button type="button" onClick={() => removeProviderApiKey(p.id, idx)} className={REMOVE_KEY_BUTTON} title="Remove Key">
                               <Trash2 size={14} />
                             </button>
                           </div>
                         ))}
                         <div className="flex gap-2">
                           <div className="flex-1">
-                            <input type="password" placeholder="Add new API key..." className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500 focus:shadow-glow focus:outline-none transition-all font-mono"
+                            <input type="password" placeholder="Add new API key..." className={`${FIELD_CLASS} font-mono`}
                               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
                               onBlur={(e) => { if (e.target.value) { addProviderApiKey(p.id, e.target.value); e.target.value = ''; } }}
                             />
                           </div>
-                          <div className="w-10 h-10 flex items-center justify-center text-indigo-500 bg-indigo-500/10 rounded-xl border border-indigo-500/20"><Plus size={16} /></div>
+                          <div className="w-10 h-10 flex items-center justify-center text-white bg-slate-950/35 rounded-xl border border-white/25"><Plus size={16} /></div>
                         </div>
                       </div>
                     </div>
                   </div>
               </div>
-              <div className="shrink-0 pt-4 border-t border-slate-800/50">
-                <button type="button" onClick={() => setEditingProviderId(null)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:from-indigo-400 hover:to-cyan-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Done</button>
+              <div className="relative z-10 shrink-0 pt-4 border-t border-white/15">
+                <button type="button" onClick={() => setEditingProviderId(null)} className={`w-full ${PRIMARY_BUTTON} cursor-pointer`}>Done</button>
               </div>
             </motion.div>
           </motion.div>
@@ -1037,20 +1239,22 @@ const Settings = ({ user: initialUser }) => {
           const providerRoutes = Object.entries(getModelRouting()).filter(([_, routeValue]) => routeIncludesProvider(routeValue, provider.id));
 
           return (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="w-full max-w-lg glass card-neon border border-slate-800 rounded-2xl p-6 space-y-6 shadow-panel max-h-[90vh] flex flex-col">
-                <div className="flex items-center justify-between shrink-0">
-                  <h2 className="text-xl font-bold text-transparent bg-clip-text text-neon-gradient font-display flex items-center gap-2">
-                    <Route size={20} className="text-cyan-400" />
-                    Routes for {provider.name || provider.id}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative flex max-h-[calc(100vh-1.5rem)] min-h-[min(680px,calc(100vh-1.5rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl p-4 sm:p-6" style={SETTINGS_CARD_THEMES.activeModel}>
+                <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 58%)' }} />
+                <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-5">
+                <div className="flex items-start justify-between gap-4 shrink-0">
+                  <h2 className="min-w-0 text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                    <Route size={20} className="text-white/75 shrink-0" />
+                    <span className="truncate break-words">{provider.name || provider.id}</span>
                   </h2>
-                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className="text-slate-400 hover:text-white cursor-pointer"><XCircle size={20}/></button>
+                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className="text-white/62 hover:text-white cursor-pointer shrink-0"><XCircle size={20}/></button>
                 </div>
 
-                <div className="space-y-4 overflow-visible flex-1 min-h-0 flex flex-col">
+                <div className="min-h-0 flex flex-1 flex-col gap-4 overflow-hidden">
                   {/* Add Model Dropdown */}
-                  <div className="relative z-50 shrink-0" ref={modelDropdownRef}>
-                    <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Add Model Route</label>
+                  <div className="relative z-50 shrink-0 rounded-2xl border border-cyan-200/20 bg-slate-950/25 p-3" ref={modelDropdownRef}>
+                    <label className={`${SETTINGS_LABEL} block mb-2`}>Add Model Route</label>
                     <input
                       type="text"
                       value={isModelDropdownOpen ? modelSearchQuery : ''}
@@ -1063,9 +1267,9 @@ const Settings = ({ user: initialUser }) => {
                         setModelSearchQuery('');
                       }}
                       placeholder="Select or search a model..."
-                      className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:border-cyan-500/50 focus:shadow-glow focus:outline-none font-mono placeholder:text-slate-500"
+                      className={`${FIELD_CLASS} rounded-lg px-3 py-2 text-[11px] font-mono placeholder:text-white/68`}
                     />
-                    <div className="absolute right-3 top-[34px] pointer-events-none text-slate-500">
+                    <div className="absolute right-6 top-[42px] pointer-events-none text-cyan-100">
                       <ChevronDown size={14} />
                     </div>
                     <AnimatePresence>
@@ -1074,7 +1278,8 @@ const Settings = ({ user: initialUser }) => {
                           initial={{ opacity: 0, y: -5 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -5 }}
-                          className="absolute z-[100] w-full mt-1 bg-slate-900/95 backdrop-blur-md border border-cyan-500/30 rounded-lg shadow-glow max-h-48 overflow-y-auto custom-scrollbar p-1"
+                          className="relative z-[100] mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-cyan-200/35 p-1.5 shadow-[0_18px_44px_rgba(8,47,73,0.42)] custom-scrollbar"
+                          style={{ background: 'linear-gradient(135deg, rgba(8,47,73,0.98) 0%, rgba(13,78,83,0.98) 52%, rgba(15,23,42,0.98) 100%)' }}
                         >
                           {availableModels
                             .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
@@ -1086,13 +1291,14 @@ const Settings = ({ user: initialUser }) => {
                                   setIsModelDropdownOpen(false);
                                   setModelSearchQuery('');
                                 }}
-                                className="px-3 py-2 text-[11px] font-mono text-slate-300 hover:text-white hover:bg-cyan-500/20 rounded cursor-pointer transition-colors"
+                                className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left font-mono text-[11px] font-semibold text-white hover:bg-cyan-100/14 cursor-pointer transition-colors"
                               >
-                                {m.name || m.id} <span className="text-slate-500 text-[10px]">({m.id})</span>
+                                <span className="truncate">{m.name || m.id}</span>
+                                <span className="truncate text-[10px] text-cyan-100/78">{m.id}</span>
                               </div>
                             ))}
                           {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
-                            <div className="px-3 py-2 text-[11px] font-mono text-slate-500 text-center">No models found</div>
+                            <div className="px-3 py-4 text-center font-mono text-[11px] font-semibold text-cyan-50/82">No models found</div>
                           )}
                         </motion.div>
                       )}
@@ -1100,14 +1306,14 @@ const Settings = ({ user: initialUser }) => {
                   </div>
 
                   {/* Existing Routes List */}
-                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 mt-4">
-                    <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">Configured Routes</label>
-                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                  <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                    <label className={`${SETTINGS_LABEL} block mb-2`}>Configured Routes</label>
+                    <p className="text-[10px] font-medium text-white/88 leading-relaxed">
                       Requests keep the selected model exactly; providers are tried in priority order only when a provider fails.
                     </p>
 
                     {providerRoutes.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-800/50 bg-slate-950/40 px-4 py-6 text-center text-slate-600">
+                      <div className="rounded-xl border border-dashed border-white/25 bg-slate-950/30 px-4 py-6 text-center font-semibold text-white/82">
                         <p className="text-xs font-medium">No models routed to this provider</p>
                       </div>
                     ) : (
@@ -1118,9 +1324,9 @@ const Settings = ({ user: initialUser }) => {
                           const fallbackOptions = routeProviders.filter((p) => !selectedTargets.has(p.id));
 
                           return (
-                            <div key={model} className="p-3 rounded-lg border border-slate-800/60 bg-slate-950/40 group hover:border-cyan-500/30 transition-colors space-y-3">
+                            <div key={model} className={`${SOFT_PANEL} group p-3 space-y-3`}>
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-[11px] font-mono text-cyan-100 break-all">{model}</span>
+                                <span className="text-[11px] font-mono text-white break-all">{model}</span>
                                 <button
                                   type="button"
                                   onClick={() => removeModelRoute(model)}
@@ -1135,18 +1341,18 @@ const Settings = ({ user: initialUser }) => {
                                 {routeEntries.map((entry, index) => {
                                   const routeProvider = getProviderForRouteTarget(entry.target);
                                   return (
-                                    <div key={`${model}-${entry.target}`} className="flex items-center gap-2 rounded-lg border border-slate-800/60 bg-slate-900/50 px-2 py-2">
-                                      <span className="w-16 shrink-0 text-[9px] font-bold uppercase tracking-[0.15em] text-cyan-400">
+                                    <div key={`${model}-${entry.target}`} className="flex items-center gap-2 rounded-lg border border-white/25 bg-slate-950/35 px-2 py-2">
+                                      <span className="w-16 shrink-0 text-[9px] font-bold uppercase tracking-[0.15em] text-cyan-100">
                                         {index === 0 ? 'Primary' : `Fallback ${index}`}
                                       </span>
-                                      <span className="min-w-0 flex-1 truncate text-[10px] text-slate-300" title={routeProvider.baseUrl || entry.target}>
+                                      <span className="min-w-0 flex-1 truncate break-all text-[10px] font-semibold text-white/88" title={routeProvider.baseUrl || entry.target}>
                                         {routeProvider.name || entry.target}
                                       </span>
                                       <button
                                         type="button"
                                         onClick={() => moveRouteProvider(model, entry.target, -1)}
                                         disabled={index === 0}
-                                        className="p-1 rounded text-slate-500 hover:text-cyan-300 disabled:opacity-30 disabled:hover:text-slate-500"
+                                        className="p-1 rounded text-white/45 hover:text-white disabled:opacity-30 disabled:hover:text-white/45"
                                         title="Move up"
                                       >
                                         <ArrowUp size={12} />
@@ -1155,7 +1361,7 @@ const Settings = ({ user: initialUser }) => {
                                         type="button"
                                         onClick={() => moveRouteProvider(model, entry.target, 1)}
                                         disabled={index === routeEntries.length - 1}
-                                        className="p-1 rounded text-slate-500 hover:text-cyan-300 disabled:opacity-30 disabled:hover:text-slate-500"
+                                        className="p-1 rounded text-white/45 hover:text-white disabled:opacity-30 disabled:hover:text-white/45"
                                         title="Move down"
                                       >
                                         <ArrowDown size={12} />
@@ -1174,19 +1380,22 @@ const Settings = ({ user: initialUser }) => {
                               </div>
 
                               {fallbackOptions.length > 0 && (
-                                <select
-                                  value=""
-                                  onChange={(e) => {
-                                    if (e.target.value) addFallbackProvider(model, e.target.value);
-                                    e.target.value = '';
-                                  }}
-                                  className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-[10px] text-slate-300 focus:border-cyan-500/50 focus:outline-none"
-                                >
-                                  <option value="">Add fallback provider...</option>
-                                  {fallbackOptions.map((p) => (
-                                    <option key={p.id} value={p.id}>{p.name || p.id}</option>
-                                  ))}
-                                </select>
+                                <div className="relative">
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value) addFallbackProvider(model, e.target.value);
+                                      e.target.value = '';
+                                    }}
+                                    className={FALLBACK_SELECT}
+                                  >
+                                    <option className={FALLBACK_OPTION} value="">Add fallback provider...</option>
+                                    {fallbackOptions.map((p) => (
+                                      <option className={FALLBACK_OPTION} key={p.id} value={p.id}>{p.name || p.id}</option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-cyan-100" />
+                                </div>
                               )}
                             </div>
                           );
@@ -1196,8 +1405,9 @@ const Settings = ({ user: initialUser }) => {
                   </div>
                 </div>
 
-                <div className="shrink-0 pt-4 border-t border-slate-800/50">
-                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-500 to-indigo-500 text-white hover:from-cyan-400 hover:to-indigo-400 shadow-[0_0_15px_-3px_rgba(34,211,238,0.4)] transition-all active:scale-95 cursor-pointer uppercase tracking-wider">Done</button>
+                <div className="shrink-0 pt-4 border-t border-white/15">
+                  <button type="button" onClick={() => setActiveRouteProviderId(null)} className={`w-full ${PRIMARY_BUTTON} cursor-pointer`}>Done</button>
+                </div>
                 </div>
               </motion.div>
             </motion.div>

@@ -18,7 +18,7 @@
  */
 
 const express = require('express');
-const { requireAccessKey } = require('../middlewares/auth-middleware');
+const { requireAccessKey } = require('../middleware/auth-middleware');
 const { proxyRequest } = require('../services/proxy');
 const { estimatePromptTokens } = require('../utils/token-budget');
 

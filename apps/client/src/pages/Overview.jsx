@@ -1,184 +1,284 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { fetchStatus, fetchLogs } from '../api';
+import { Activity, AlertTriangle, CalendarDays, Clock3, Database, Gauge, Radio, Send, Server, SquarePen } from 'lucide-react';
+import { fetchStatus, fetchModelDistribution } from '../api';
+import { queryKeys } from '../api/queryKeys';
 import PageHeader from '../components/dashboard/PageHeader';
-import UsageTrendChart from '../components/dashboard/UsageTrendChart';
 import ModelDistribution from '../components/dashboard/ModelDistribution';
-import { SkeletonKpi, SkeletonChart, EmptyState, ErrorState } from '../components/dashboard/StateBanner';
-import AccessKeyDisplay from '../components/common/AccessKeyDisplay';
+import { ErrorState } from '../components/dashboard/StateBanner';
+import { getTokenTotal } from '../utils/tokenUsage';
+import OverviewSkeleton from '../components/dashboard/OverviewSkeleton';
+import { useLiveLogs } from '../context/LiveLogsContext';
 
-const GRADIENTS = {
-  blue:    'linear-gradient(135deg, #6366f1 0%, #818cf8 100%)',
-  rose:    'linear-gradient(135deg, #fb7185 0%, #f43f5e 100%)',
-  emerald: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
-  violet:  'linear-gradient(135deg, #a855f7 0%, #818cf8 100%)',
-  cyan:    'linear-gradient(135deg, #22d3ee 0%, #38bdf8 100%)',
-  neon:    'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
-  amber:   'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
-};
+const ACTIVITY_LOG_LIMIT = 10;
+// Vibrant gradient card themes matching the screenshot
+const CARD_THEMES = [
+  { gradient: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', glow: 'rgba(99,102,241,0.4)',  iconBg: 'rgba(99,102,241,0.2)',  border: 'rgba(99,102,241,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)', glow: 'rgba(59,130,246,0.4)',  iconBg: 'rgba(59,130,246,0.2)',  border: 'rgba(59,130,246,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #06b6d4 0%, #10b981 100%)', glow: 'rgba(6,182,212,0.4)',   iconBg: 'rgba(6,182,212,0.2)',   border: 'rgba(6,182,212,0.3)'   },
+  { gradient: 'linear-gradient(135deg, #10b981 0%, #22c55e 100%)', glow: 'rgba(16,185,129,0.4)',  iconBg: 'rgba(16,185,129,0.2)',  border: 'rgba(16,185,129,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)', glow: 'rgba(245,158,11,0.4)',  iconBg: 'rgba(245,158,11,0.2)',  border: 'rgba(245,158,11,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)', glow: 'rgba(236,72,153,0.4)',  iconBg: 'rgba(236,72,153,0.2)',  border: 'rgba(236,72,153,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)', glow: 'rgba(59,130,246,0.4)',  iconBg: 'rgba(59,130,246,0.2)',  border: 'rgba(59,130,246,0.3)'  },
+  { gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', glow: 'rgba(16,185,129,0.4)',  iconBg: 'rgba(16,185,129,0.2)',  border: 'rgba(16,185,129,0.3)'  },
+];
 
+function formatCompact(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return new Intl.NumberFormat('en', {
+    notation: n >= 10000 ? 'compact' : 'standard',
+    maximumFractionDigits: n >= 10000 ? 1 : 0,
+  }).format(n);
+}
+
+function isToday(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+function formatLatency(ms) {
+  const v = Number(ms);
+  if (!Number.isFinite(v) || v <= 0) return '--';
+  if (v >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}s`;
+  return `${Math.round(v)}ms`;
+}
+
+const MODEL_DISTRIBUTION_COLORS = ['#6366f1','#10b981','#a855f7','#fb7185','#22d3ee','#fbbf24'];
+
+function normalizeModelDistribution(dist = []) {
+  const total = dist.reduce((a, b) => a + b.requests, 0) || 1;
+  return dist.map(({ name, requests }, idx) => ({
+    name,
+    requests,
+    percentage: (requests / total) * 100,
+    color: MODEL_DISTRIBUTION_COLORS[idx % MODEL_DISTRIBUTION_COLORS.length],
+  }));
+}
+
+const StatCard = ({ title, value, icon: Icon, subtitle, theme, delay = 0 }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 24 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.45, delay, ease: [0.23, 1, 0.32, 1] }}
+    className="relative h-[96px] overflow-hidden rounded-2xl p-4 cursor-default sm:h-[104px] sm:p-5"
+    style={{ background: theme.gradient, boxShadow: `0 8px 32px ${theme.glow}` }}
+  >
+    {/* inner shine */}
+    <div className="absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 60%)' }} />
+
+    <div className="relative z-10 flex items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] mb-2 text-white/70">{title}</p>
+        <p className="text-2xl font-black truncate leading-none text-white">{value}</p>
+        {subtitle && <p className="mt-1.5 text-xs font-medium truncate text-white/60">{subtitle}</p>}
+      </div>
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20">
+        <Icon size={18} className="text-white" />
+      </div>
+    </div>
+  </motion.div>
+);
+
+const ActivityFeed = ({ logs = [], loading = false }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.5, delay: 0.3 }}
+    className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl px-5 py-4 sm:px-6 sm:py-5"
+    style={{
+      background: 'linear-gradient(135deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.045) 100%)',
+      backdropFilter: 'blur(22px)',
+      border: '1px solid rgba(255,255,255,0.22)',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 18px 48px rgba(11,8,38,0.26)',
+    }}
+  >
+    <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 55%)' }} />
+
+    <div className="relative z-10 flex shrink-0 items-center justify-between gap-3">
+      <h3 className="text-[13px] font-black uppercase tracking-[0.02em]" style={{ color: '#FFFFFF' }}>Request Activity</h3>
+      <span
+        className="inline-flex items-center gap-2 text-[13px] font-bold uppercase"
+        style={{ color: 'rgba(255,255,255,0.78)' }}
+      >
+        <Radio size={16} strokeWidth={1.7} /> Live
+      </span>
+    </div>
+    <div className="relative z-10 mt-4 shrink-0 border-t" style={{ borderColor: 'rgba(255,255,255,0.18)' }} />
+
+    {loading ? (
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-hidden">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="grid grid-cols-[32px_30px_minmax(0,1fr)] items-start gap-3 py-2">
+            <div className="h-7 w-7 rounded-lg bg-white/10 animate-pulse" />
+            <div className="h-6 w-6 rounded-lg bg-white/10 animate-pulse" />
+            <div className="min-w-0 space-y-2">
+              <div className="h-4 w-4/5 rounded bg-white/10 animate-pulse" />
+              <div className="h-3 w-3/5 rounded bg-white/10 animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : logs.length === 0 ? (
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-3 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}>
+          <Radio size={20} style={{ color: 'rgba(255,255,255,0.78)' }} />
+        </div>
+        <p className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.74)' }}>No requests yet</p>
+      </div>
+    ) : (
+      <div className="custom-scrollbar relative z-10 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+        <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.12)' }}>
+          {logs.map((log) => {
+            const status = Number(log.status);
+            const isStatusOk = status === 200;
+            const statusTone = isStatusOk
+              ? {
+                  color: '#34d399',
+                }
+              : {
+                  color: '#fb7185',
+                };
+            const tokens = getTokenTotal(log);
+            const provider = log.provider || 'AgentRouter';
+            return (
+              <div
+                key={log.id || log._id || `${log.timestamp}-${log.model}`}
+                className="grid grid-cols-[32px_30px_minmax(0,1fr)] items-start gap-3 py-4"
+              >
+                <div className="pt-0.5" style={{ color: 'rgba(255,255,255,0.76)' }}>
+                  <SquarePen size={25} strokeWidth={1.55} />
+                </div>
+                <div className="pt-1" style={{ color: 'rgba(255,255,255,0.68)' }}>
+                  <Radio size={19} strokeWidth={1.55} />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-semibold leading-tight" style={{ color: '#FFFFFF' }}>
+                    {log.method || 'POST'} {log.model || 'Unknown'} | {provider}
+                  </p>
+                  <p className="mt-1 text-[13px] font-medium leading-tight" style={{ color: 'rgba(255,255,255,0.72)' }}>
+                    {formatLatency(log.latencyMs)} / {tokens > 0 ? `${formatCompact(tokens)} tokens` : '-- tokens'} |{' '}
+                    <span className="font-black" style={{ color: statusTone.color }}>
+                      {Number.isFinite(status) ? status : '--'}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    )}
+  </motion.div>
+);
 
 const Overview = ({ user }) => {
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [error, setError] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const [usageTrendData, setUsageTrendData] = useState([]);
-  const [modelDistributionData, setModelDistributionData] = useState([]);
-  const [copiedEndpoint, setCopiedEndpoint] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const intervalRef = useRef(null);
-  const logsIntervalRef = useRef(null);
-  const endpoint = 'http://localhost:3000/v1';
+  const { logs: liveLogs, connectionStatus } = useLiveLogs();
+  const statusQuery = useQuery({
+    queryKey: queryKeys.status(),
+    queryFn: fetchStatus,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+    placeholderData: (previousData) => previousData,
+  });
+  const modelDistributionQuery = useQuery({
+    queryKey: queryKeys.modelDistribution(),
+    queryFn: fetchModelDistribution,
+    select: normalizeModelDistribution,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const loadData = useCallback(async () => {
-    try {
-      const statusData = await fetchStatus();
-      setStatus(statusData);
-
-      const logsRaw = await fetchLogs({ limit: 20 });
-      const logsData = Array.isArray(logsRaw) ? logsRaw : logsRaw?.logs || [];
-      setLogs(logsData);
-
-      if (statusData) {
-        setUsageTrendData([]);
-        const modelMap = {};
-        logsData.forEach(log => {
-          const model = log.model || 'Unknown';
-          modelMap[model] = (modelMap[model] || 0) + 1;
-        });
-        const total = Object.values(modelMap).reduce((a, b) => a + b, 0) || 1;
-        setModelDistributionData(
-          Object.entries(modelMap)
-            .map(([name, requests], idx) => ({
-              name,
-              requests,
-              percentage: (requests / total) * 100,
-              color: [GRADIENTS.blue, GRADIENTS.emerald, GRADIENTS.violet, GRADIENTS.rose, GRADIENTS.cyan, GRADIENTS.amber][idx % 6].match(/#[a-f0-9]{6}/i)?.[0] || GRADIENTS.blue,
-            }))
-        );
-      }
-
-      setError(null);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setIsInitialLoad(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetch = async () => {
-      await loadData();
-      if (!cancelled) setIsInitialLoad(false);
-    };
-    fetch();
-    intervalRef.current = setInterval(fetch, 10_000);
-    logsIntervalRef.current = setInterval(async () => {
-      try {
-        const logsRaw = await fetchLogs({ limit: 20 });
-        const logsData = Array.isArray(logsRaw) ? logsRaw : logsRaw?.logs || [];
-        if (!cancelled) setLogs(logsData);
-      } catch (e) {
-        console.error('Failed to fetch logs:', e.message);
-      }
-    }, 30_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(intervalRef.current);
-      clearInterval(logsIntervalRef.current);
-    };
-  }, [loadData]);
-
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedEndpoint(true);
-    setTimeout(() => setCopiedEndpoint(false), 2000);
-  };
+  const status = statusQuery.data || null;
+  const logs = useMemo(() => liveLogs.slice(0, ACTIVITY_LOG_LIMIT), [liveLogs]);
+  const logsLoading = connectionStatus === 'connecting';
+  const modelDistributionData = modelDistributionQuery.data || [];
+  const fetchError = statusQuery.error?.message || null;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadData();
+    await Promise.all([
+      statusQuery.refetch(),
+      modelDistributionQuery.refetch(),
+    ]);
     setTimeout(() => setIsRefreshing(false), 600);
   };
 
-  if (isInitialLoad) {
-    return (
-      <div className="flex flex-col gap-5 pb-10">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="h-16 w-48 rounded-2xl"
-          style={{
-            background: 'linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.02) 75%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer 1.5s infinite',
-          }}
-        />
-        <SkeletonKpi />
-        <SkeletonChart />
-        <SkeletonChart />
-      </div>
-    );
+  const kpis = useMemo(() => {
+    const now = Date.now();
+    const recentLogs = logs.filter(l => { const t = new Date(l.timestamp).getTime(); return Number.isFinite(t) && t >= now - 60_000; });
+    const latencies = logs.map(l => Number(l.latencyMs)).filter(v => Number.isFinite(v) && v > 0);
+    const fallbackAvg = latencies.length ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length) : 0;
+    const todayLogs = logs.filter(l => isToday(l.timestamp));
+    const totalRequests = Number.isFinite(Number(status?.totalRequests)) ? Number(status.totalRequests) : logs.length;
+    const todayRequests = Number.isFinite(Number(status?.todayRequests)) ? Number(status.todayRequests) : totalRequests;
+    const totalTokens = Number.isFinite(Number(status?.totalTokens)) ? Number(status.totalTokens) : logs.reduce((s, l) => s + getTokenTotal(l), 0);
+    const todayTokens = Number.isFinite(Number(status?.todayTokens)) ? Number(status.todayTokens) : todayLogs.reduce((s, l) => s + getTokenTotal(l), 0);
+    const statusAvg = Number(status?.avgLatencyMs ?? status?.avgLatency);
+    const avgLatency = Number.isFinite(statusAvg) && statusAvg > 0 ? statusAvg : fallbackAvg;
+    const sorted = [...logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const latest = sorted[0];
+    const errorCount = logs.filter(l => Number(l.status) >= 400).length;
+    const errorRate = logs.length > 0 ? ((errorCount / logs.length) * 100).toFixed(1) : '0.0';
+
+    return [
+      { title: 'Total Requests',   value: formatCompact(totalRequests),  icon: Database,      subtitle: 'All tracked requests',       theme: CARD_THEMES[0] },
+      { title: 'Today Requests',   value: formatCompact(todayRequests),  icon: Send,          subtitle: 'Local calendar day',         theme: CARD_THEMES[1] },
+      { title: "Today's Tokens",   value: formatCompact(todayTokens),    icon: CalendarDays,  subtitle: 'Tokens used today',          theme: CARD_THEMES[2] },
+      { title: 'Total Tokens',     value: formatCompact(totalTokens),    icon: Activity,      subtitle: 'All tracked usage',          theme: CARD_THEMES[3] },
+      { title: 'Requests / Min',   value: formatCompact(recentLogs.length), icon: Gauge,      subtitle: 'RPM to upstream API',        theme: CARD_THEMES[6] },
+      { title: 'Avg Latency',      value: formatLatency(avgLatency),     icon: Clock3,        subtitle: 'Average upstream latency',   theme: CARD_THEMES[5] },
+      { title: 'Active Model',     value: latest?.model || '--',         icon: Server,        subtitle: `via ${latest?.provider || '--'}`, theme: CARD_THEMES[6] },
+      { title: 'Error Rate',       value: `${errorRate}%`,               icon: AlertTriangle, subtitle: `${errorCount} of ${logs.length} requests`, theme: { gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', glow: 'rgba(239,68,68,0.4)', iconBg: 'rgba(239,68,68,0.2)', border: 'rgba(239,68,68,0.3)' } },
+    ];
+  }, [logs, status]);
+
+  const isInitialLoading = statusQuery.isPending && !statusQuery.data;
+
+  if (isInitialLoading) {
+    return <OverviewSkeleton />;
   }
 
-  if (error && !status) {
+  if (fetchError && !status) {
     return (
       <div className="flex flex-col gap-5 pb-10">
         <div className="h-32" />
-        <ErrorState message={error} onRetry={handleRefresh} />
+        <ErrorState message={fetchError} onRetry={handleRefresh} />
       </div>
     );
   }
 
-  const hasData = status && (
-    status.totalRequests > 0 ||
-    status.activeModels > 0 ||
-    logs.length > 0
-  );
-
   return (
-    <div className="h-full flex flex-col gap-4 overflow-hidden">
-      {/* ── PAGE HEADER ──────────────────────────────────────────────────── */}
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
       <div className="shrink-0">
-        <PageHeader
-          isConnected={!error}
-          onRefresh={handleRefresh}
-          isRefreshing={isRefreshing}
-          endpoint={endpoint}
-          onCopy={handleCopy}
-          copied={copiedEndpoint}
-        />
+        <PageHeader isConnected={!fetchError} onRefresh={handleRefresh} isRefreshing={isRefreshing} />
       </div>
 
-      <div className="shrink-0">
-        <AccessKeyDisplay accessKey={user?.accessKey} />
-      </div>
-
-      {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4">
-        {error ? (
-          <div className="h-full overflow-y-auto pr-2">
-            <ErrorState message={error} onRetry={handleRefresh} />
-          </div>
-        ) : !hasData ? (
-          <div className="h-full overflow-y-auto pr-2">
-            <EmptyState
-              title="No data yet — start proxying requests"
-              description="Your dashboard will populate with live metrics once you begin sending requests through the AI Proxy Gateway."
-              ctaText="Configure Your First Model"
-              onCta={() => window.location.href = '/settings'}
-            />
-          </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {fetchError ? (
+          <ErrorState message={fetchError} onRetry={handleRefresh} />
         ) : (
-          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 min-h-0">
-              <UsageTrendChart data={usageTrendData} logs={logs} loading={false} />
+          <div className="flex h-full min-h-0 flex-col gap-5">
+            {/* KPI grid */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {kpis.map((kpi, i) => (
+                <StatCard key={kpi.title} {...kpi} delay={i * 0.05} />
+              ))}
             </div>
-            <div className="min-h-0">
-              <ModelDistribution data={modelDistributionData} loading={false} />
+
+            {/* Charts row */}
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="min-h-0 min-w-0">
+                <ModelDistribution data={modelDistributionData} loading={false} />
+              </div>
+              <div className="min-h-0 min-w-0">
+                <ActivityFeed logs={logs} loading={logsLoading} />
+              </div>
             </div>
           </div>
         )}

@@ -18,6 +18,7 @@ const SCOPES = 'read:user copilot';
 const COPILOT_PROVIDER_ID = 'copilot';
 const COPILOT_PROVIDER_NAME = 'GitHub Copilot';
 const COPILOT_PROVIDER_BASE_URL = process.env.COPILOT_PROVIDER_BASE_URL || 'http://localhost:3000/copilot/v1';
+const AUTH_REQUEST_TIMEOUT_MS = Number(process.env.COPILOT_AUTH_TIMEOUT_MS || 60_000);
 
 const authStateByUser = new Map();
 const authAgent = new https.Agent({
@@ -27,6 +28,12 @@ const authAgent = new https.Agent({
   timeout: 60_000,
 });
 
+function applyRequestTimeout(req, label) {
+  req.setTimeout(AUTH_REQUEST_TIMEOUT_MS, () => {
+    req.destroy(new Error(`${label} timed out after ${AUTH_REQUEST_TIMEOUT_MS}ms`));
+  });
+}
+
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
 }
@@ -35,8 +42,15 @@ function toUserKey(userId) {
   return userId ? userId.toString() : 'default';
 }
 
+function canPersistProviderState(userId) {
+  if (!userId || !isDbConnected()) return false;
+  if (userId instanceof mongoose.Types.ObjectId) return true;
+  return mongoose.Types.ObjectId.isValid(userId.toString());
+}
+
 function toObjectId(userId) {
   if (!userId) return null;
+  if (!canPersistProviderState(userId)) return null;
   return userId instanceof mongoose.Types.ObjectId
     ? userId
     : new mongoose.Types.ObjectId(userId.toString());
@@ -58,13 +72,19 @@ function getRuntimeState(userId) {
 
 async function hydrateState(userId) {
   const state = getRuntimeState(userId);
-  if (state.hydrated || !userId || !isDbConnected()) {
+  if (state.hydrated || !canPersistProviderState(userId)) {
+    state.hydrated = true;
+    return state;
+  }
+
+  const objectId = toObjectId(userId);
+  if (!objectId) {
     state.hydrated = true;
     return state;
   }
 
   const provider = await Provider.findOne({
-    userId: toObjectId(userId),
+    userId: objectId,
     providerId: COPILOT_PROVIDER_ID,
   }).select('copilotAuth').lean();
 
@@ -79,7 +99,8 @@ async function hydrateState(userId) {
 }
 
 async function persistState(userId, state, user = null) {
-  if (!userId || !isDbConnected()) return;
+  const objectId = toObjectId(userId);
+  if (!objectId) return;
 
   const update = {
     name: COPILOT_PROVIDER_NAME,
@@ -97,13 +118,13 @@ async function persistState(userId, state, user = null) {
 
   await Provider.updateOne(
     {
-      userId: toObjectId(userId),
+      userId: objectId,
       providerId: COPILOT_PROVIDER_ID,
     },
     {
       $set: update,
       $setOnInsert: {
-        userId: toObjectId(userId),
+        userId: objectId,
         providerId: COPILOT_PROVIDER_ID,
         isActive: true,
       },
@@ -146,6 +167,7 @@ function httpsPost(url, body, headers = {}) {
     });
 
     req.on('error', reject);
+    applyRequestTimeout(req, 'GitHub Copilot auth request');
     req.write(postData);
     req.end();
   });
@@ -179,6 +201,7 @@ function httpsGet(url, headers = {}) {
     });
 
     req.on('error', reject);
+    applyRequestTimeout(req, 'GitHub Copilot token request');
     req.end();
   });
 }

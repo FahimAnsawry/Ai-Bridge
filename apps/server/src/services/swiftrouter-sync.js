@@ -8,9 +8,25 @@
 
 const axios = require('axios');
 const { loadConfig, clearConfigCache } = require('../config/config');
+const { isGuestUserId, loadGuestConfig, saveGuestConfig } = require('../config/guest-store');
 
 function normalizeBaseUrl(url = '') {
   return String(url).replace(/\/+$/, '');
+}
+
+function isBlazeApiBaseUrl(url = '') {
+  return String(url).toLowerCase().includes('blazeai.boxu.dev');
+}
+
+function normalizeProviderBaseUrl(url = '') {
+  const baseUrl = normalizeBaseUrl(url);
+  if (!isBlazeApiBaseUrl(baseUrl)) return baseUrl;
+
+  return baseUrl
+    .replace(/\/api\/v1$/i, '/api')
+    .replace(/\/v1$/i, '/api')
+    .replace(/\/api$/i, '/api')
+    .replace(/^(https?:\/\/blazeai\.boxu\.dev)$/i, '$1/api');
 }
 
 function inferProviderFromId(id = '') {
@@ -26,7 +42,6 @@ function inferProviderFromId(id = '') {
   if (s.includes('zhipu') || s.includes('glm')) return 'Zhipu';
   if (s.includes('minimax')) return 'MiniMax';
   if (s.includes('moonshot') || s.includes('kimi')) return 'Moonshot';
-  if (s.includes('nvidia') || s.includes('nemotron')) return 'NVIDIA';
   if (s.includes('ibm') || s.includes('granite')) return 'IBM';
   if (s.includes('essential')) return 'EssentialAI';
   if (s.includes('cogito')) return 'DeepCogito';
@@ -184,7 +199,7 @@ async function syncProviderModels(userId, options = {}) {
     throw err;
   }
 
-  const baseUrl = normalizeBaseUrl(targetProvider.baseUrl);
+  const baseUrl = normalizeProviderBaseUrl(targetProvider.baseUrl);
   if (!baseUrl) {
     const err = new Error(`${targetProvider.name || targetProvider.id} baseUrl is empty.`);
     err.code = 'missing_base_url';
@@ -228,19 +243,60 @@ async function syncProviderModels(userId, options = {}) {
   const mergedCustomModels = mergeCustomModels(normalizedModels, existingCustomModels);
 
   if (persist) {
-    const { ModelCatalog } = require('../config/db');
+    if (isGuestUserId(userId)) {
+      const guestConfig = loadGuestConfig({
+        port: 3000,
+        cors_origins: ['*'],
+        model_routing: {},
+        stub_models: [],
+        request_minimization_enabled: true,
+        chat_max_upstream_attempts: 30,
+        token_optimization_enabled: false,
+        prompt_budget_tokens: 0,
+        token_summarization_enabled: false,
+        response_cache_enabled: false,
+        response_cache_ttl_seconds: 30,
+        active_provider_id: 'swiftrouter',
+        active_model_id: '',
+        providers: [],
+      });
 
-    await ModelCatalog.findOneAndUpdate(
-      { userId, providerId: targetProvider.id },
-      {
-        models: mergedCustomModels,
-        categories: modelCatalog.categories,
-        lastSyncedAt: new Date(),
-        warnings: modelCatalog.warnings
-      },
-      { upsert: true, returnDocument: 'after' }
-    );
-    clearConfigCache(userId);
+      const currentCatalogs = Array.isArray(guestConfig.model_catalogs) ? guestConfig.model_catalogs : [];
+      const nextCatalogs = [
+        ...currentCatalogs.filter((catalog) => catalog.providerId !== targetProvider.id),
+        {
+          providerId: targetProvider.id,
+          models: mergedCustomModels,
+          categories: modelCatalog.categories,
+          lastSyncedAt: new Date().toISOString(),
+          warnings: modelCatalog.warnings,
+          sourceProviderId: modelCatalog.sourceProviderId,
+          totalModels: modelCatalog.totalModels,
+          totalProviders: modelCatalog.totalProviders,
+          providers: modelCatalog.providers,
+        },
+      ];
+
+      saveGuestConfig({
+        ...guestConfig,
+        model_catalogs: nextCatalogs,
+      });
+      clearConfigCache(userId);
+    } else {
+      const { ModelCatalog } = require('../config/db');
+
+      await ModelCatalog.findOneAndUpdate(
+        { userId, providerId: targetProvider.id },
+        {
+          models: mergedCustomModels,
+          categories: modelCatalog.categories,
+          lastSyncedAt: new Date(),
+          warnings: modelCatalog.warnings
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+      clearConfigCache(userId);
+    }
 
   }
 

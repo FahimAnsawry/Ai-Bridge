@@ -2,6 +2,7 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const { User, UserConfig, Provider } = require('./db');
 const { DEFAULTS } = require('./config');
+const { isGuestUserId, loadGuestUser } = require('./guest-store');
 
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID || 'dummy-client-id',
@@ -13,10 +14,8 @@ passport.use(new GoogleStrategy({
     if (require('./db').mongoose.connection.readyState !== 1) {
       console.warn('[passport] DB not connected, logging in as mock guest user');
       return done(null, {
-        _id: '000000000000000000000000',
-        email: profile.emails?.[0]?.value || 'guest@local.host',
-        role: 'admin',
-        displayName: profile.displayName + ' (Guest Mode)'
+        ...loadGuestUser(),
+        displayName: profile.displayName ? `${profile.displayName} (Guest Mode)` : loadGuestUser().displayName,
       });
     }
 
@@ -97,14 +96,13 @@ passport.serializeUser((user, done) => {
 });
 
 passport.deserializeUser(async (id, done) => {
+  if (isGuestUserId(id)) {
+    return done(null, loadGuestUser());
+  }
+
   // Guard against DB disconnection
   if (require('./db').mongoose.connection.readyState !== 1) {
-    return done(null, {
-      _id: '000000000000000000000000',
-      email: 'guest@local.host',
-      role: 'admin',
-      displayName: 'Guest (No DB Mode)'
-    });
+    return done(null, loadGuestUser());
   }
 
   try {

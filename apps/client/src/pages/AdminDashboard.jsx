@@ -1,42 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { fetchUsers, fetchGlobalStats, deleteUser, setUserRole } from '../api';
+import { queryKeys } from '../api/queryKeys';
 import PageHeader from '../components/dashboard/PageHeader';
 
 function AdminDashboard() {
-  const [users, setUsers] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadData = async () => {
-    try {
-      const [usersData, statsData] = await Promise.all([
-        fetchUsers(),
-        fetchGlobalStats()
-      ]);
-      setUsers(usersData);
-      setStats(statsData);
-      setLoading(false);
-    } catch (err) {
-      console.error(err);
-      setLoading(false);
-    }
+  const queryClient = useQueryClient();
+  const usersQuery = useQuery({
+    queryKey: queryKeys.adminUsers(),
+    queryFn: fetchUsers,
+  });
+  const statsQuery = useQuery({
+    queryKey: queryKeys.adminStats(),
+    queryFn: fetchGlobalStats,
+  });
+  const invalidateAdminData = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminStats() });
   };
+  const deleteUserMutation = useMutation({
+    mutationFn: deleteUser,
+    onSuccess: invalidateAdminData,
+  });
+  const setUserRoleMutation = useMutation({
+    mutationFn: ({ id, role }) => setUserRole(id, role),
+    onSuccess: invalidateAdminData,
+  });
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const users = usersQuery.data || [];
+  const stats = statsQuery.data || null;
+  const loading = usersQuery.isPending || statsQuery.isPending;
 
   const handleDelete = async (id) => {
     if (confirm('Delete user? This cannot be undone.')) {
-      await deleteUser(id);
-      loadData();
+      await deleteUserMutation.mutateAsync(id);
     }
   };
 
   const handleRoleChange = async (id, role) => {
-    await setUserRole(id, role);
-    loadData();
+    await setUserRoleMutation.mutateAsync({ id, role });
   };
 
   if (loading) return <div>Loading admin data...</div>;

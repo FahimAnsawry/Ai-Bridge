@@ -3,6 +3,7 @@
  */
 
 const { mongoose, User, GlobalConfig, ModelCatalog, UserConfig, Provider } = require('./db');
+const { isGuestUserId, loadGuestConfig, saveGuestConfig } = require('./guest-store');
 
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
@@ -33,7 +34,7 @@ const DEFAULTS = {
   model_routing: {},
   stub_models: [],
   request_minimization_enabled: true,
-  chat_max_upstream_attempts: 20,
+  chat_max_upstream_attempts: 30,
   token_optimization_enabled: false,
   prompt_budget_tokens: 0,
   token_summarization_enabled: false,
@@ -66,6 +67,13 @@ const DEFAULTS = {
   ]
 };
 
+function normalizeChatMaxUpstreamAttempts(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULTS.chat_max_upstream_attempts;
+
+  const attempts = Math.floor(parsed);
+  return attempts === 4 ? DEFAULTS.chat_max_upstream_attempts : attempts;
+}
 
 function normalizeActiveProviderId(providers, activeProviderId) {
   const list = Array.isArray(providers) ? providers : [];
@@ -169,6 +177,17 @@ async function loadConfig(userId, options = {}) {
 
   const includeCatalogs = options.includeCatalogs !== false;
 
+  if (isGuestUserId(userId)) {
+    const guestConfig = loadGuestConfig(DEFAULTS);
+    return {
+      ...guestConfig,
+      model_routing: normalizeModelRouting(guestConfig.model_routing),
+      active_provider_id: normalizeActiveProviderId(guestConfig.providers, guestConfig.active_provider_id),
+      active_provider_ids: getActiveProviderIds(guestConfig.providers),
+      model_catalogs: Array.isArray(guestConfig.model_catalogs) ? guestConfig.model_catalogs : [],
+    };
+  }
+
   if (userId === 'default' || !isDbConnected()) {
     return {
       port: DEFAULTS.port,
@@ -243,7 +262,9 @@ async function loadConfig(userId, options = {}) {
     active_provider_ids: getActiveProviderIds(providers),
     stub_models: cfg.stubModels || user.config?.stubModels || [],
     request_minimization_enabled: cfg.requestMinimizationEnabled ?? user.config?.requestMinimizationEnabled ?? DEFAULTS.request_minimization_enabled,
-    chat_max_upstream_attempts: cfg.chatMaxUpstreamAttempts ?? user.config?.chatMaxUpstreamAttempts ?? DEFAULTS.chat_max_upstream_attempts,
+    chat_max_upstream_attempts: normalizeChatMaxUpstreamAttempts(
+      cfg.chatMaxUpstreamAttempts ?? user.config?.chatMaxUpstreamAttempts ?? DEFAULTS.chat_max_upstream_attempts
+    ),
     token_optimization_enabled: cfg.tokenOptimizationEnabled ?? user.config?.tokenOptimizationEnabled ?? DEFAULTS.token_optimization_enabled,
     prompt_budget_tokens: cfg.promptBudgetTokens ?? user.config?.promptBudgetTokens ?? DEFAULTS.prompt_budget_tokens,
     token_summarization_enabled: cfg.tokenSummarizationEnabled ?? user.config?.tokenSummarizationEnabled ?? DEFAULTS.token_summarization_enabled,
@@ -273,6 +294,47 @@ async function loadConfig(userId, options = {}) {
 async function saveConfig(userId, updates) {
   if (!userId) throw new Error('saveConfig requires a userId');
   clearConfigCache(userId);
+
+  if (isGuestUserId(userId)) {
+    const current = await loadConfig(userId);
+    const providers = Array.isArray(updates.providers)
+      ? updates.providers.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          baseUrl: provider.baseUrl,
+          apiKey: provider.apiKey,
+          apiKeys: Array.isArray(provider.apiKeys) ? provider.apiKeys : (provider.apiKey ? [provider.apiKey] : []),
+          isActive: provider.isActive !== undefined ? provider.isActive : true,
+        }))
+      : current.providers;
+
+    const requestedActiveProviderId = updates.active_provider_id !== undefined
+      ? updates.active_provider_id
+      : current.active_provider_id;
+
+    const next = {
+      ...current,
+      ...(updates.port !== undefined ? { port: updates.port } : {}),
+      ...(updates.cors_origins !== undefined ? { cors_origins: updates.cors_origins } : {}),
+      ...(updates.stub_models !== undefined ? { stub_models: updates.stub_models } : {}),
+      ...(updates.request_minimization_enabled !== undefined ? { request_minimization_enabled: !!updates.request_minimization_enabled } : {}),
+      ...(updates.token_optimization_enabled !== undefined ? { token_optimization_enabled: !!updates.token_optimization_enabled } : {}),
+      ...(updates.token_summarization_enabled !== undefined ? { token_summarization_enabled: !!updates.token_summarization_enabled } : {}),
+      ...(updates.response_cache_enabled !== undefined ? { response_cache_enabled: !!updates.response_cache_enabled } : {}),
+      ...(updates.prompt_budget_tokens !== undefined ? { prompt_budget_tokens: Number.isFinite(Number(updates.prompt_budget_tokens)) ? Math.max(0, Math.floor(Number(updates.prompt_budget_tokens))) : DEFAULTS.prompt_budget_tokens } : {}),
+      ...(updates.chat_max_upstream_attempts !== undefined ? { chat_max_upstream_attempts: normalizeChatMaxUpstreamAttempts(updates.chat_max_upstream_attempts) } : {}),
+      ...(updates.response_cache_ttl_seconds !== undefined ? { response_cache_ttl_seconds: Number.isFinite(Number(updates.response_cache_ttl_seconds)) ? Math.max(1, Math.floor(Number(updates.response_cache_ttl_seconds))) : DEFAULTS.response_cache_ttl_seconds } : {}),
+      ...(updates.active_model_id !== undefined ? { active_model_id: String(updates.active_model_id || '').trim() } : {}),
+      ...(updates.model_routing !== undefined ? { model_routing: normalizeModelRouting(updates.model_routing) } : {}),
+      providers,
+      active_provider_id: normalizeActiveProviderId(providers, requestedActiveProviderId),
+      active_provider_ids: getActiveProviderIds(providers),
+      model_catalogs: Array.isArray(current.model_catalogs) ? current.model_catalogs : [],
+    };
+
+    saveGuestConfig(next);
+    return next;
+  }
 
   if (!isDbConnected()) {
     const base = await loadConfig('default');
@@ -395,10 +457,7 @@ async function saveConfig(userId, updates) {
     configUpdates.requestMinimizationEnabled = updates.request_minimization_enabled;
   }
   if (updates.chat_max_upstream_attempts !== undefined) {
-    const parsedAttempts = Number(updates.chat_max_upstream_attempts);
-    configUpdates.chatMaxUpstreamAttempts = Number.isFinite(parsedAttempts) && parsedAttempts >= 1
-      ? Math.floor(parsedAttempts)
-      : DEFAULTS.chat_max_upstream_attempts;
+    configUpdates.chatMaxUpstreamAttempts = normalizeChatMaxUpstreamAttempts(updates.chat_max_upstream_attempts);
   }
   if (updates.token_optimization_enabled !== undefined) {
     configUpdates.tokenOptimizationEnabled = !!updates.token_optimization_enabled;

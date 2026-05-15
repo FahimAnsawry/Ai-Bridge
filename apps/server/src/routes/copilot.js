@@ -15,8 +15,9 @@
  */
 
 const express = require('express');
-const { requireAccessKey } = require('../middlewares/auth-middleware');
+const { requireAccessKey } = require('../middleware/auth-middleware');
 const { mongoose, User } = require('../config/db');
+const { loadGuestUser } = require('../config/guest-store');
 const {
   startDeviceFlow,
   pollDeviceFlow,
@@ -49,6 +50,8 @@ async function resolveCopilotUser(req) {
 
   const apiKey = getRequestApiKey(req);
   if (apiKey) {
+    const guestUser = loadGuestUser();
+    if (apiKey === guestUser.accessKey) return guestUser;
     return User.findOne({ accessKey: apiKey }).select('_id accessKey').lean();
   }
 

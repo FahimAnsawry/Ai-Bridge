@@ -1,7 +1,7 @@
 const { loadConfig, saveConfig, loadGlobalConfig } = require('../config/config');
-const { getLogs, getLatestLog, clearLogs, getStats } = require('../middlewares/logger');
+const { getLogs, getLatestLog, clearLogs, getStats, getModelDistribution } = require('../middleware/logger');
 const { mongoose, User, ModelCatalog, RequestLog, Provider } = require('../config/db');
-const { isNvidiaNimProvider } = require('../utils/provider-detection');
+const { isGuestUserId } = require('../config/guest-store');
 
 function isFreeModelProvider(provider) {
   const baseUrl = provider?.baseUrl;
@@ -28,11 +28,6 @@ function formatUptime(ms) {
 }
 
 function createAdminService(runtime) {
-  function getActiveProvider(config) {
-    const providers = Array.isArray(config.providers) ? config.providers : [];
-    return providers.find((provider) => provider.id === config.active_provider_id) || null;
-  }
-
   function uniqueModels(models = []) {
     const seen = new Set();
     return models.filter((model) => {
@@ -46,7 +41,14 @@ function createAdminService(runtime) {
     const runtimeState = await runtime.getState();
     const stats = await getStats(userId);
     const latestLog = await getLatestLog(userId);
-    const modelCount = await ModelCatalog.countDocuments({ userId });
+    let modelCount = 0;
+    if (isGuestUserId(userId) || !isDbConnected()) {
+      const guestConfig = await loadConfig(userId);
+      const catalogs = Array.isArray(guestConfig.model_catalogs) ? guestConfig.model_catalogs : [];
+      modelCount = catalogs.reduce((sum, catalog) => sum + (Array.isArray(catalog.models) ? catalog.models.length : 0), 0);
+    } else {
+      modelCount = await ModelCatalog.countDocuments({ userId });
+    }
 
     const errorRate = stats.totalRequests > 0 
       ? Math.round((stats.errors / stats.totalRequests) * 100) 
@@ -60,6 +62,8 @@ function createAdminService(runtime) {
       totalRequests: stats.totalRequests,
       avgLatencyMs: stats.avgLatency,
       totalTokens: stats.totalTokens,
+      todayRequests: stats.todayRequests || 0,
+      todayTokens: stats.todayTokens || 0,
       estimatedTokenSavings: stats.estimatedTokenSavings || 0,
       optimizationRequests: stats.optimizationRequests || 0,
       summarizedRequests: stats.summarizedRequests || 0,
@@ -163,6 +167,10 @@ function createAdminService(runtime) {
     return await getLogs(userId, filters);
   }
 
+  async function modelDistribution(userId) {
+    return await getModelDistribution(userId);
+  }
+
   async function clearAllLogs(userId) {
     await clearLogs(userId);
     return { success: true };
@@ -171,20 +179,12 @@ function createAdminService(runtime) {
   async function listModels(userId) {
     const config = await loadConfig(userId);
     const catalogs = Array.isArray(config.model_catalogs) ? config.model_catalogs : [];
-    const activeProvider = getActiveProvider(config);
-    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProvider);
-    const activeCatalog = activeProvider
-      ? catalogs.find((cat) => cat.providerId === activeProvider.id)
-      : null;
-    const modelList = activeProviderIsNvidiaNim
-      ? (activeCatalog?.models || [])
-      : catalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
+    const modelList = catalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
     const now = Math.floor(Date.now() / 1000);
 
     return {
       object: 'list',
-      sourceProviderId: activeProviderIsNvidiaNim ? activeProvider?.id : null,
-      activeProviderIsNvidiaNim,
+      sourceProviderId: null,
       data: uniqueModels(modelList).map((model) => ({
         id: model.id,
         object: 'model',
@@ -197,24 +197,6 @@ function createAdminService(runtime) {
   async function getModelOfferings(userId) {
     const config = await loadConfig(userId);
     const catalogs = config.model_catalogs || [];
-    const activeProvider = getActiveProvider(config);
-    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProvider);
-    const activeCatalog = activeProvider
-      ? catalogs.find(c => c.providerId === activeProvider.id)
-      : null;
-
-    if (activeProviderIsNvidiaNim) {
-      return activeCatalog || {
-        sourceProviderId: activeProvider?.id || 'nvidia-nim',
-        lastSyncedAt: null,
-        totalModels: 0,
-        totalProviders: 0,
-        providers: [],
-        categories: { chat: 0, vision: 0, code: 0, other: 0 },
-        warnings: ['No NVIDIA NIM model catalog yet. Run sync to populate models from the active NIM provider.'],
-      };
-    }
-
     const swiftCatalog = catalogs.find(c => c.providerId === 'swiftrouter');
 
     if (!swiftCatalog) {
@@ -284,6 +266,7 @@ function createAdminService(runtime) {
     saveConfig: saveConfigSnapshot,
     listLogs,
     clearLogs: clearAllLogs,
+    modelDistribution,
     listModels,
     getModelOfferings,
     syncModels,

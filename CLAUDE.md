@@ -22,16 +22,15 @@ No test suite is configured.
 
 ## Architecture
 
-This is a local AI proxy server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (SwiftRouter, Anthropic, OpenAI-compatible APIs, GitHub Copilot, NVIDIA NIM).
+This is a local AI proxy server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (SwiftRouter, Anthropic, OpenAI-compatible APIs, GitHub Copilot).
 
-### Two-server setup
+### Single-server setup
 
-The app runs two HTTP servers from a single Node process:
+The app runs one Express HTTP server from a single Node process:
 
-- **Proxy server** (`port 3000`) — the AI proxy. AI tools point their API base URL here. Handles `/v1/*` and `/copilot/*`.
-- **Web/API server** (`port 3001`) — serves the dashboard REST API (`/api/*`) and auth routes. The React client talks to this.
+- **Unified server** (`port 3000`) — serves the AI proxy (`/v1/*`), Copilot proxy (`/copilot/*`), dashboard REST API (`/api/*`), auth routes (`/auth/*`), health checks, Socket.IO, and the built React dashboard when `apps/client/dist` exists.
 
-Both servers share a single `ProxyRuntime` instance (`apps/server/src/services/proxy-runtime.js`) that manages state and the proxy server lifecycle.
+`ProxyRuntime` (`apps/server/src/services/proxy-runtime.js`) runs in embedded mode for standalone startup, so proxy routes are mounted on the unified Express app instead of opening a second HTTP listener.
 
 ### Request flow
 
@@ -87,11 +86,10 @@ Requests must only be routed to the AI model selected by the client. For example
 
 ### Environment variables
 
-`MONGODB_URI`, `SESSION_SECRET`, `HOST`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NVIDIA_NIM_MAX_LOCAL_WAIT_MS`, `NVIDIA_NIM_SLOW_LOG_MS`
+`MONGODB_URI`, `SESSION_SECRET`, `HOST`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 ### Provider-specific quirks (in proxy.js)
 
-- **NVIDIA NIM**: TCP warmup, `tool_choice` object→string normalization, content flattening
 - **Gemini**: consecutive same-role message merging, strict tool-call/response parity
 - **EcomAgent**: all Claude model variants remapped to `claude-opus-4.6`
 - **Timy**: model ID normalization (dots vs hyphens)
@@ -100,4 +98,4 @@ Requests must only be routed to the AI model selected by the client. For example
 
 ### Client
 
-React + Vite app at `apps/client/`. Pages: `Overview`, `Settings`, `Logs`, `Models`, `SetupGuide`, `AdminDashboard`, `Login`. Communicates with the web server via REST (`http://localhost:3001/api/*`) and Socket.IO for real-time log streaming.
+React + Vite app at `apps/client/`. Pages include `Overview`, `Settings`, `Logs`, `Models`, `Docs`, `AdminDashboard`, and `Login`. In dev, Vite proxies REST and Socket.IO traffic to `http://127.0.0.1:3000`; in production, the unified server serves the built client and same-origin API routes.

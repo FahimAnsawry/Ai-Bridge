@@ -1,69 +1,66 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import {
   PieChart,
   Pie,
   Cell,
-  Tooltip,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import { Box } from 'lucide-react';
 
 const RADIAN = Math.PI / 180;
 
-const CustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+const formatName = (name = '', max = 24) => (String(name).length > max ? `${String(name).slice(0, max - 2)}...` : name);
+
+const CustomLabel = ({ cx, cy, midAngle, outerRadius, percent, name, requests }) => {
   if (percent < 0.05) return null;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const sin = Math.sin(-midAngle * RADIAN);
+  const cos = Math.cos(-midAngle * RADIAN);
+  const startX = cx + outerRadius * cos;
+  const startY = cy + outerRadius * sin;
+  const midX = cx + (outerRadius + 14) * cos;
+  const midY = cy + (outerRadius + 14) * sin;
+  const endX = midX + (cos >= 0 ? 40 : -40);
+  const textAnchor = cos >= 0 ? 'start' : 'end';
+  const labelX = endX + (cos >= 0 ? 7 : -7);
+  const isMajorSlice = percent >= 0.12;
+  const label = `${formatName(name)} ${(percent * 100).toFixed(1)}% (${requests})`;
 
   return (
-    <text
-      x={x}
-      y={y}
-      fill="white"
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontSize={12}
-      fontWeight="bold"
-    >
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-};
-
-const CustomTooltip = ({ active, payload }) => {
-  if (active && payload && payload.length) {
-    const entry = payload[0].payload;
-    return (
-      <div
-        className="p-3 rounded-lg text-sm"
-        style={{
-          background: 'var(--color-bg-panel)',
-          border: '1px solid var(--color-glass-border)',
-          backdropFilter: 'blur(12px)',
-        }}
+    <g>
+      <path
+        d={`M${startX},${startY}L${midX},${midY}L${endX},${midY}`}
+        fill="none"
+        stroke="rgba(214,218,255,0.75)"
+        strokeWidth={1.2}
+      />
+      <text
+        x={labelX}
+        y={midY}
+        fill="#FFFFFF"
+        textAnchor={textAnchor}
+        dominantBaseline="central"
+        fontSize={11}
+        fontWeight={700}
       >
-        <p className="font-bold text-[--color-text-primary]">{entry.name}</p>
-        <p className="text-xs text-[--color-text-tertiary] mt-1">
-          {entry.requests.toLocaleString()} requests
-        </p>
-      </div>
-    );
-  }
-  return null;
+        {isMajorSlice ? (
+          <>
+            <tspan x={labelX} dy="-0.45em">{formatName(name, 19)}</tspan>
+            <tspan x={labelX} dy="1.15em">{`${(percent * 100).toFixed(1)}% (${requests})`}</tspan>
+          </>
+        ) : label}
+      </text>
+    </g>
+  );
 };
 
 const COLORS = ['#6366f1', '#10b981', '#a855f7', '#fb7185', '#22d3ee', '#fbbf24', '#818cf8', '#34d399'];
 
 const ModelDistribution = ({ data = [], loading = false }) => {
-  const [hoveredIndex, setHoveredIndex] = useState(null);
-
   if (loading) {
     return (
       <div
-        className="relative p-5 rounded-2xl overflow-hidden"
+        className="relative h-full p-5 rounded-2xl overflow-hidden"
         style={{
           background: 'var(--color-bg-panel)',
           border: '1px solid var(--color-glass-border)',
@@ -73,107 +70,67 @@ const ModelDistribution = ({ data = [], loading = false }) => {
     );
   }
 
+  const GLASS = {
+    background: 'linear-gradient(135deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.045) 100%)',
+    backdropFilter: 'blur(22px)',
+    border: '1px solid rgba(255,255,255,0.22)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 18px 48px rgba(11,8,38,0.26)',
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.3 }}
-      className="relative p-5 rounded-2xl overflow-hidden"
-      style={{
-        background: 'var(--color-bg-panel)',
-        border: '1px solid var(--color-glass-border)',
-      }}
+      className="relative h-full rounded-2xl overflow-hidden flex flex-col px-5 py-4"
+      style={GLASS}
     >
-      <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' }} />
+      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 55%)' }} />
 
-      <div className="mb-3.5">
-        <h3 className="text-base font-bold text-[--color-text-primary]">Model Distribution</h3>
-        <p className="text-xs font-medium text-[--color-text-tertiary] mt-0.5">
-          Traffic split across deployed models
-        </p>
+      <div className="relative z-10 mb-1 shrink-0">
+        <h3 className="text-[13px] font-black uppercase tracking-[0.02em]" style={{ color: '#FFFFFF' }}>Model Distribution</h3>
       </div>
 
       {data.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 gap-3">
+        <div className="relative z-10 flex flex-col items-center justify-center flex-1 gap-3">
           <div
-            className="h-14 w-14 rounded-2xl flex items-center justify-center"
-            style={{
-              background: 'rgba(168,85,247,0.06)',
-              border: '1px solid rgba(168,85,247,0.15)',
-            }}
+            className="h-12 w-12 rounded-2xl flex items-center justify-center"
+            style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.25)' }}
           >
-            <Box size={24} style={{ color: '#a855f7' }} />
+            <Box size={22} style={{ color: '#a855f7' }} />
           </div>
-          <p className="text-sm font-medium text-[--color-text-tertiary]">
-            No model distribution data available yet.
+          <p className="text-sm font-medium" style={{ color: '#726D97' }}>
+            No model distribution data yet.
           </p>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex-1 w-full" style={{ minHeight: 190 }}>
-            <ResponsiveContainer width="100%" height={190}>
-              <PieChart>
+        <div className="relative z-10 min-h-0 min-w-0 flex-1">
+          <div className="h-full min-h-[210px] min-w-0 w-full">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <PieChart margin={{ top: 8, right: 130, bottom: 8, left: 130 }}>
                 <Pie
                   data={data}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={88}
-                  paddingAngle={2}
+                  cy="54%"
+                  innerRadius={0}
+                  outerRadius="62%"
+                  paddingAngle={0}
                   dataKey="requests"
                   labelLine={false}
                   label={CustomLabel}
-                  onMouseEnter={(_, index) => setHoveredIndex(index)}
-                  onMouseLeave={() => setHoveredIndex(null)}
+                  isAnimationActive={false}
                 >
                   {data.map((entry, index) => (
                     <Cell
                       key={`cell-${index}`}
                       fill={entry.color || COLORS[index % COLORS.length]}
-                      stroke="var(--color-bg-panel)"
-                      strokeWidth={2}
-                      opacity={hoveredIndex !== null && hoveredIndex !== index ? 0.5 : 1}
+                      stroke="rgba(20,18,70,0.88)"
+                      strokeWidth={1}
                     />
                   ))}
                 </Pie>
-                <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
-          </div>
-
-          <div className="flex flex-wrap justify-center gap-2 w-full">
-            {data.map((entry, index) => (
-              <div
-                key={entry.name}
-                className="flex items-center justify-between gap-4 px-3 py-2 rounded-lg cursor-pointer transition-all"
-                style={{
-                  background: hoveredIndex === index ? 'rgba(255,255,255,0.04)' : 'transparent',
-                }}
-                onMouseEnter={() => setHoveredIndex(index)}
-                onMouseLeave={() => setHoveredIndex(null)}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="h-3 w-3 rounded-full"
-                    style={{
-                      background: entry.color || COLORS[index % COLORS.length],
-                      boxShadow: `0 0 8px ${entry.color || COLORS[index % COLORS.length]}40`,
-                    }}
-                  />
-                  <span className="text-xs font-bold text-[--color-text-secondary]">
-                    {entry.name}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-[--color-text-primary]">
-                    {entry.percentage?.toFixed(1) ?? '0.0'}%
-                  </span>
-                  <span className="text-xs font-medium text-[--color-text-tertiary]">
-                    ({entry.requests.toLocaleString()})
-                  </span>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}

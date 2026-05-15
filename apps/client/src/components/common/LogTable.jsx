@@ -46,45 +46,149 @@ const LogTable = ({ logs = [], loading = false }) => {
   }
 
   return (
-    <div className="h-full min-h-0 overflow-x-auto overflow-y-auto" ref={scrollRef}>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            {['Time', 'Model', 'Provider', 'Status', 'Tokens', 'Type'].map((col) => (
-              <th
-                key={col}
-                className="px-4 py-3.5 text-left text-xs font-black uppercase tracking-[0.2em] text-[--color-text-tertiary]"
-              >
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <AnimatePresence initial={false}>
-            {logs.map((log) => {
-              const isOk = log.status < 400;
-              const usage = getTokenUsage(log);
-
-              return (
-                <motion.tr
-                  key={log.id || log._id}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="group transition-colors"
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.04)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+    <>
+      {/* Desktop table view */}
+      <div className="hidden sm:block h-full min-h-0 overflow-x-auto overflow-y-auto" ref={scrollRef}>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              {['Time', 'Model', 'Provider', 'Status', 'Tokens', 'Type'].map((col) => (
+                <th
+                  key={col}
+                  className="px-4 py-3.5 text-left text-xs font-black uppercase tracking-[0.2em] text-[--color-text-tertiary]"
                 >
-                  <td className="px-4 py-3.5 whitespace-nowrap font-mono text-[11px] font-bold text-[--color-text-tertiary]">
-                    {formatTime(log.timestamp)}
-                  </td>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <AnimatePresence initial={false}>
+              {logs.map((log) => {
+                const isOk = log.status < 400;
+                const usage = getTokenUsage(log);
 
-                  <td className="px-4 py-3.5">
+                return (
+                  <motion.tr
+                    key={log.id || log._id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="group transition-colors"
+                    style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.04)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-[11px] font-bold text-[--color-text-tertiary]">
+                      {formatTime(log.timestamp)}
+                    </td>
+
+                    <td className="px-4 py-3.5">
+                      {log.model && log.model !== 'unknown' ? (
+                        <code
+                          className="break-all text-sm font-bold px-2 py-0.5 rounded"
+                          style={{
+                            background: 'rgba(129,140,248,0.08)',
+                            border: '1px solid rgba(129,140,248,0.15)',
+                            color: '#a5b4fc',
+                          }}
+                        >
+                          {log.model}
+                        </code>
+                      ) : (
+                        <span className="text-xs font-medium text-[--color-text-tertiary]">Unknown</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      {log.provider ? (
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded"
+                          style={{
+                            background: 'rgba(34,211,238,0.08)',
+                            border: '1px solid rgba(34,211,238,0.2)',
+                            color: '#22d3ee',
+                          }}
+                        >
+                          {log.provider}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium text-[--color-text-tertiary]">—</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3.5">
+                      <div
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest"
+                        style={
+                          isOk
+                            ? { background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: '#34d399' }
+                            : { background: 'rgba(251,113,133,0.1)', border: '1px solid rgba(251,113,133,0.25)', color: '#fb7185' }
+                        }
+                      >
+                        <div
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{
+                            background: isOk ? '#34d399' : '#fb7185',
+                            boxShadow: isOk ? '0 0 6px rgba(52,211,153,0.8)' : '0 0 6px rgba(251,113,133,0.8)',
+                          }}
+                        />
+                        {log.status}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3.5 text-xs font-bold text-[--color-text-secondary]">
+                      {usage.hasUsage && usage.totalTokens > 0 ? (
+                        <span style={{ color: '#818cf8' }}>{usage.totalTokens.toLocaleString()}</span>
+                      ) : '—'}
+                    </td>
+
+                    <td className="px-4 py-3.5">
+                      {log.streaming ? (
+                        <span
+                          className="text-xs font-black uppercase tracking-widest"
+                          style={{ color: '#818cf8', textShadow: '0 0 8px rgba(129,140,248,0.5)' }}
+                        >
+                          EventStream
+                        </span>
+                      ) : (
+                        <span className="text-xs font-black uppercase tracking-widest text-[--color-text-tertiary]">
+                          Buffered
+                        </span>
+                      )}
+                    </td>
+                  </motion.tr>
+                );
+              })}
+            </AnimatePresence>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile card view */}
+      <div className="sm:hidden h-full min-h-0 overflow-y-auto space-y-3 p-3" ref={scrollRef}>
+        <AnimatePresence initial={false}>
+          {logs.map((log) => {
+            const isOk = log.status < 400;
+            const usage = getTokenUsage(log);
+
+            return (
+              <motion.div
+                key={log.id || log._id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="rounded-xl border p-3 space-y-2"
+                style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  borderColor: 'rgba(255,255,255,0.08)',
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
                     {log.model && log.model !== 'unknown' ? (
                       <code
-                        className="break-all text-sm font-bold px-2 py-0.5 rounded"
+                        className="block break-all text-xs font-bold px-2 py-1 rounded"
                         style={{
                           background: 'rgba(129,140,248,0.08)',
                           border: '1px solid rgba(129,140,248,0.15)',
@@ -94,74 +198,65 @@ const LogTable = ({ logs = [], loading = false }) => {
                         {log.model}
                       </code>
                     ) : (
-                      <span className="text-xs font-medium text-[--color-text-tertiary]">Unknown</span>
+                      <span className="text-xs font-medium text-[--color-text-tertiary]">Unknown Model</span>
                     )}
-                  </td>
-
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    {log.provider ? (
-                      <span
-                        className="text-xs font-bold px-2 py-0.5 rounded"
-                        style={{
-                          background: 'rgba(34,211,238,0.08)',
-                          border: '1px solid rgba(34,211,238,0.2)',
-                          color: '#22d3ee',
-                        }}
-                      >
-                        {log.provider}
-                      </span>
-                    ) : (
-                      <span className="text-xs font-medium text-[--color-text-tertiary]">—</span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3.5">
+                  </div>
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0"
+                    style={
+                      isOk
+                        ? { background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: '#34d399' }
+                        : { background: 'rgba(251,113,133,0.1)', border: '1px solid rgba(251,113,133,0.25)', color: '#fb7185' }
+                    }
+                  >
                     <div
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest"
-                      style={
-                        isOk
-                          ? { background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: '#34d399' }
-                          : { background: 'rgba(251,113,133,0.1)', border: '1px solid rgba(251,113,133,0.25)', color: '#fb7185' }
-                      }
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{
+                        background: isOk ? '#34d399' : '#fb7185',
+                        boxShadow: isOk ? '0 0 6px rgba(52,211,153,0.8)' : '0 0 6px rgba(251,113,133,0.8)',
+                      }}
+                    />
+                    {log.status}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                  {log.provider && (
+                    <span
+                      className="font-bold px-2 py-0.5 rounded"
+                      style={{
+                        background: 'rgba(34,211,238,0.08)',
+                        border: '1px solid rgba(34,211,238,0.2)',
+                        color: '#22d3ee',
+                      }}
                     >
-                      <div
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{
-                          background: isOk ? '#34d399' : '#fb7185',
-                          boxShadow: isOk ? '0 0 6px rgba(52,211,153,0.8)' : '0 0 6px rgba(251,113,133,0.8)',
-                        }}
-                      />
-                      {log.status}
-                    </div>
-                  </td>
+                      {log.provider}
+                    </span>
+                  )}
+                  {usage.hasUsage && usage.totalTokens > 0 && (
+                    <span className="font-bold text-[--color-text-secondary]">
+                      {usage.totalTokens.toLocaleString()} tokens
+                    </span>
+                  )}
+                  <span
+                    className="font-black uppercase tracking-wider"
+                    style={log.streaming ? { color: '#818cf8' } : { color: 'var(--color-text-tertiary)' }}
+                  >
+                    {log.streaming ? 'Stream' : 'Buffered'}
+                  </span>
+                </div>
 
-                  <td className="px-4 py-3.5 text-xs font-bold text-[--color-text-secondary]">
-                    {usage.hasUsage && usage.totalTokens > 0 ? (
-                      <span style={{ color: '#818cf8' }}>{usage.totalTokens.toLocaleString()}</span>
-                    ) : '—'}
-                  </td>
-
-                  <td className="px-4 py-3.5">
-                    {log.streaming ? (
-                      <span
-                        className="text-xs font-black uppercase tracking-widest"
-                        style={{ color: '#818cf8', textShadow: '0 0 8px rgba(129,140,248,0.5)' }}
-                      >
-                        EventStream
-                      </span>
-                    ) : (
-                      <span className="text-xs font-black uppercase tracking-widest text-[--color-text-tertiary]">
-                        Buffered
-                      </span>
-                    )}
-                  </td>
-                </motion.tr>
-              );
-            })}
-          </AnimatePresence>
-        </tbody>
-      </table>
-    </div>
+                <div className="pt-1 border-t border-white/5">
+                  <span className="font-mono text-[10px] font-bold text-[--color-text-tertiary]">
+                    {formatTime(log.timestamp)}
+                  </span>
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+    </>
   );
 };
 

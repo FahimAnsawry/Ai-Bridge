@@ -1,18 +1,25 @@
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); // Load env variables early
+require('./config/console-timestamp'); // Patch console.* with ISO timestamps
 require('./config/db'); // Connect to MongoDB
 const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
 const session = require('express-session');
 const _connectMongo = require('connect-mongo');
 const MongoStore = _connectMongo.default || _connectMongo; // ESM/CJS interop
 const { Server: SocketIOServer } = require('socket.io');
+const { mongoose } = require('./config/db');
 
-const { attachSocketIO } = require('./middlewares/logger');
+const { attachSocketIO, morganStream } = require('./middleware/logger');
 const createDashboardRouter = require('./routes/dashboard');
 const copilotRouter = require('./routes/copilot');
+const v1Router = require('./routes/v1');
 const { createProxyRuntime } = require('./services/proxy-runtime');
 const passport = require('./config/passport');
-const { requireAuth } = require('./middlewares/auth-middleware');
+const { requireAuth } = require('./middleware/auth-middleware');
+const { loadGuestUser } = require('./config/guest-store');
 
 function createWebServer(options = {}) {
   const runtime = options.runtime || createProxyRuntime({ 
@@ -20,24 +27,57 @@ function createWebServer(options = {}) {
     userId: options.userId || 'default' 
   });
   const app = express();
+  const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
+  const hasClientDist = fs.existsSync(path.join(clientDistPath, 'index.html'));
+  const frontendUrl = options.frontendUrl || process.env.FRONTEND_URL || 'http://localhost:5174';
+
+  function frontendRedirect(pathname) {
+    if (hasClientDist) return pathname;
+    return new URL(pathname, frontendUrl).toString();
+  }
 
   const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-proxy';
+  const useMongoSessionStore = mongoose.connection.readyState === 1;
+
+  app.use(
+    cors({
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version'],
+    })
+  );
+  app.use(morgan('dev', { stream: morganStream }));
+
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/v1/v1')) {
+      req.url = req.url.replace('/v1/v1', '/v1');
+    }
+    next();
+  });
 
   app.use(session({
     secret: process.env.SESSION_SECRET || 'fallback-secret',
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({
-      mongoUrl: mongoUri,
-      collectionName: 'sessions',
-      ttl: 7 * 24 * 60 * 60, // 7 days
-    }),
+    ...(useMongoSessionStore
+      ? {
+          store: MongoStore.create({
+            mongoUrl: mongoUri,
+            collectionName: 'sessions',
+            ttl: 7 * 24 * 60 * 60, // 7 days
+          }),
+        }
+      : {}),
     cookie: {
       secure: false,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
     },
   }));
+
+  if (!useMongoSessionStore) {
+    console.warn('[session] Mongo session store unavailable, using in-memory sessions.');
+  }
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -70,13 +110,20 @@ function createWebServer(options = {}) {
     function(req, res) {
       // Successful authentication, redirect dashboard.
       const isNew = req.user.isNewUser;
-      res.redirect(`/dashboard?login=success${isNew ? '&first=true' : ''}`);
+      res.redirect(frontendRedirect(`/dashboard?login=success${isNew ? '&first=true' : ''}`));
     }
   );
 
+  app.get('/auth/guest', (req, res, next) => {
+    req.login(loadGuestUser(), (error) => {
+      if (error) return next(error);
+      res.redirect(frontendRedirect('/dashboard?login=success&guest=true'));
+    });
+  });
+
   app.get('/auth/logout', (req, res) => {
     req.logout((err) => {
-      res.redirect('/?logout=success');
+      res.redirect(frontendRedirect('/?logout=success'));
     });
   });
 
@@ -93,6 +140,17 @@ function createWebServer(options = {}) {
 
   // GitHub Copilot Proxy — always mounted (auth handled internally)
   app.use('/copilot', copilotRouter);
+
+  // OpenAI / Anthropic compatible proxy routes
+  app.use('/v1', v1Router);
+
+  if (hasClientDist) {
+    app.use(express.static(clientDistPath));
+    app.get('/{*path}', (req, res) => {
+      res.sendFile(path.join(clientDistPath, 'index.html'));
+    });
+    return { app, runtime };
+  }
 
   app.get('/{*path}', (req, res) => {
     res.status(200).json({
@@ -141,28 +199,31 @@ async function startStandaloneServer() {
     host: bindHost,
     publicPort: port,
     userId,
+    embedded: true,
   });
-  const dashboardUrl = 'http://localhost:5174 (Vite dev server)';
+  const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
+  const hasClientDist = fs.existsSync(path.join(clientDistPath, 'index.html'));
+  const baseUrl = `http://${bindHost}:${port}`;
+  const dashboardUrl = hasClientDist ? baseUrl : 'http://localhost:5174 (Vite dev server)';
   const { app } = createWebServer({
     runtime,
     dashboardUrl,
+    frontendUrl: 'http://localhost:5174',
   });
   await runtime.start();
 
-  const webPort = port + 1;
-  const webServer = app.listen(webPort, bindHost, async () => {
+  const server = app.listen(port, bindHost, async () => {
     const state = await runtime.getState();
     const endpoint = state.endpoint || `http://${bindHost}:${port}/v1`;
-    const apiBase = `http://${bindHost}:${webPort}`;
     console.log('');
     console.log('AI Proxy Server - SwiftRouter');
     console.log(`Proxy:     ${endpoint}`);
-    console.log(`API:       ${apiBase}/api`);
+    console.log(`API:       ${baseUrl}/api`);
     console.log(`Dashboard: ${dashboardUrl}`);
     console.log('');
   });
 
-  const io = new SocketIOServer(webServer, {
+  const io = new SocketIOServer(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
   });
   attachSocketIO(io);
@@ -184,7 +245,7 @@ async function startStandaloneServer() {
 
   const shutdown = async () => {
     await runtime.stop().catch(() => {});
-    webServer.close(() => process.exit(0));
+    server.close(() => process.exit(0));
   };
 
   process.on('SIGTERM', shutdown);

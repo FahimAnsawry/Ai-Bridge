@@ -12,6 +12,7 @@ const requestLogSchema = new mongoose.Schema({
   promptTokens: Number,
   completionTokens: Number,
   totalTokens: Number,
+  tokenUsageEstimated: Boolean,
   streaming: Boolean,
   provider: String,
   optimization: {
@@ -29,6 +30,28 @@ const requestLogSchema = new mongoose.Schema({
 });
 
 requestLogSchema.index({ userId: 1, timestamp: -1 });
+requestLogSchema.index({ timestamp: -1 });
+requestLogSchema.index({ userId: 1, status: 1 });
 
 const RequestLog = mongoose.model('RequestLog', requestLogSchema);
+
+let indexBuildPromise = null;
+
+function createIndexesWhenConnected() {
+  if (indexBuildPromise) return indexBuildPromise;
+
+  indexBuildPromise = RequestLog.createIndexes().catch(err => {
+    indexBuildPromise = null;
+    console.error('[RequestLog] Failed to create indexes:', err.message);
+  });
+
+  return indexBuildPromise;
+}
+
+if (mongoose.connection.readyState === 1) {
+  createIndexesWhenConnected();
+} else {
+  mongoose.connection.once('connected', createIndexesWhenConnected);
+}
+
 module.exports = RequestLog;

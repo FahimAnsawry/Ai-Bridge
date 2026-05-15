@@ -15,7 +15,7 @@ const KPICard = ({ title, value, icon, trend, trendLabel, sparklineData, gradien
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay, ease: [0.23, 1, 0.32, 1] }}
       whileHover={{ scale: 1.02, y: -4, transition: { duration: 0.2 } }}
-      className="relative flex flex-col justify-between p-5 rounded-2xl overflow-hidden cursor-default"
+      className="relative flex h-full min-h-[84px] flex-col justify-between overflow-hidden rounded-xl p-3 cursor-default sm:min-h-[90px]"
       style={{
         background: 'var(--color-bg-panel)',
         border: '1px solid var(--color-glass-border)',
@@ -31,16 +31,16 @@ const KPICard = ({ title, value, icon, trend, trendLabel, sparklineData, gradien
       }}
     >
       <div
-        className="absolute -top-6 -right-6 w-16 h-16 rounded-full blur-xl opacity-30 pointer-events-none"
+        className="absolute -top-4 -right-4 w-10 h-10 rounded-full blur-xl opacity-25 pointer-events-none"
         style={{ background: gradient }}
       />
 
       <div className="absolute top-0 left-0 right-0 h-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: gradient }} />
 
-      <div className="flex items-center justify-between mb-3 relative z-10">
-        <p className="text-xs font-bold uppercase tracking-[0.15em] text-[--color-text-tertiary]">{title}</p>
+      <div className="flex items-center justify-between gap-2 mb-2 relative z-10">
+        <p className="min-w-0 truncate text-[10px] font-bold uppercase tracking-[0.12em] text-[--color-text-tertiary]">{title}</p>
         <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
           style={{
             background: `${gradient.replace(')', ', 0.15)').replace('linear-gradient', 'linear-gradient')}`,
             border: '1px solid rgba(255,255,255,0.08)',
@@ -52,8 +52,8 @@ const KPICard = ({ title, value, icon, trend, trendLabel, sparklineData, gradien
         </div>
       </div>
 
-      <div className="flex items-baseline gap-3 relative z-10">
-        <p className="text-3xl font-black text-[--color-text-primary]">
+      <div className="flex min-w-0 items-baseline gap-3 relative z-10">
+        <p className="min-w-0 truncate text-xl font-black text-[--color-text-primary] sm:text-2xl">
           {loading ? '—' : value}
         </p>
         {!loading && trend != null && (
@@ -71,12 +71,12 @@ const KPICard = ({ title, value, icon, trend, trendLabel, sparklineData, gradien
       </div>
 
       {!loading && trendLabel && (
-        <p className="mt-1 text-xs font-medium text-[--color-text-tertiary] relative z-10">{trendLabel}</p>
+        <p className="mt-1 truncate text-xs font-medium text-[--color-text-tertiary] relative z-10">{trendLabel}</p>
       )}
 
       {!loading && sparklineData && sparklineData.length > 0 && (
-        <div className="mt-3 h-10 w-full relative z-10" style={{ minHeight: 40 }}>
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="relative z-10 mt-3 h-10 min-w-0 w-full" style={{ minHeight: 40 }}>
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
             <AreaChart data={sparklineData}>
               <defs>
                 <linearGradient id={`gradient-${title.replace(/\s/g, '')}`} x1="0" y1="0" x2="0" y2="1">

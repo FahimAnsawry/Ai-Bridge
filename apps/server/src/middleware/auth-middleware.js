@@ -1,4 +1,5 @@
 const { mongoose, User } = require('../config/db');
+const { loadGuestUser } = require('../config/guest-store');
 
 const ACCESS_KEY_CACHE_TTL_MS = 10_000;
 const accessKeyCache = new Map();
@@ -9,18 +10,14 @@ function isDbConnected() {
 }
 
 // Mock guest user for when DB is down
-const MOCK_GUEST_USER = {
-  _id: '000000000000000000000000',
-  email: 'guest@local.host',
-  role: 'admin',
-  displayName: 'Guest (No DB Mode)',
-  accessKey: 'local-my-secret-key'
-};
+function getGuestUser() {
+  return loadGuestUser();
+}
 
 function requireAuth(req, res, next) {
   // If DB is down, auto-login as guest
   if (!isDbConnected()) {
-    req.user = MOCK_GUEST_USER;
+    req.user = getGuestUser();
     return next();
   }
 
@@ -58,11 +55,19 @@ async function requireAccessKey(req, res, next) {
 
   // If DB is down, allow "local-my-secret-key" as guest
   if (!isDbConnected()) {
-    if (apiKey === 'local-my-secret-key') {
-      req.user = MOCK_GUEST_USER;
+    if (apiKey === getGuestUser().accessKey) {
+      req.user = getGuestUser();
       return next();
     }
-    return sendAccessKeyError(401, 'Invalid API key (DB is down, use default key).');
+    return sendAccessKeyError(401, 'Invalid API key (DB is down, use the guest key).');
+  }
+
+  const guestUser = getGuestUser();
+  if (apiKey === guestUser.accessKey) {
+    req.user = guestUser;
+    req.__authCacheHit = false;
+    req.__authTimingMs = Date.now() - authStart;
+    return next();
   }
 
   try {

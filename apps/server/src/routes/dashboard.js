@@ -12,8 +12,10 @@
  */
 
 const express = require('express');
+const { User } = require('../config/db');
 const { createAdminService } = require('../services/admin-service');
-const { requireAdmin } = require('../middlewares/auth-middleware');
+const { requireAdmin } = require('../middleware/auth-middleware');
+const { isGuestUserId, regenerateGuestAccessKey } = require('../config/guest-store');
 
 const ALLOWED_CONFIG_FIELDS = [
   'aigcbest_api_key',
@@ -103,6 +105,15 @@ function createDashboardRouter(runtime) {
     }
   });
 
+  router.get('/model-distribution', async (req, res) => {
+    try {
+      res.json(await adminService.modelDistribution(req.user._id));
+    } catch (error) {
+      console.error('[model-distribution] Failed:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to get model distribution.' });
+    }
+  });
+
   router.get('/models', async (req, res) => {
     try {
       res.json(await adminService.listModels(req.user._id));
@@ -152,6 +163,11 @@ function createDashboardRouter(runtime) {
 
   router.post('/user/regenerate-key', async (req, res) => {
     try {
+      if (isGuestUserId(req.user._id)) {
+        const guestUser = regenerateGuestAccessKey();
+        return res.json({ accessKey: guestUser.accessKey });
+      }
+
       const user = await User.findById(req.user._id);
       const newKey = user.generateAccessKey();
       await user.save();

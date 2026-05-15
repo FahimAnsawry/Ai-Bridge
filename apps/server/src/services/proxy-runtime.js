@@ -5,11 +5,10 @@ const morgan = require('morgan');
 const { EventEmitter } = require('events');
 
 const { loadConfig } = require('../config/config');
-const { morganStream } = require('../middlewares/logger');
+const { morganStream } = require('../middleware/logger');
 const v1Router = require('../routes/v1');
 const copilotRouter = require('../routes/copilot');
 const { syncSwiftRouterModels } = require('./swiftrouter-sync');
-const { warmupNvidiaNimConnection } = require('./proxy');
 
 function createProxyRuntime(options = {}) {
   const userId = options.userId; // user context is now required
@@ -178,8 +177,6 @@ function createProxyRuntime(options = {}) {
       lastError = error.message;
       emitState().catch(console.error);
     });
-
-    warmupNvidiaNimConnection();
 
     return getState();
   }

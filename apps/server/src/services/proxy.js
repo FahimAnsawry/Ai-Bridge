@@ -6,19 +6,67 @@
  */
 
 const axios = require('axios');
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
 const { loadConfig } = require('../config/config');
+const { buildUpstreamRequest } = require('./proxy/upstream-request');
 const {
-  isNvidiaNimProvider,
-  isNvidiaNimValue,
-} = require('../utils/provider-detection');
-const { sanitizeNvidiaNimRequestBody } = require('../utils/nvidia-nim');
+  isChatGenerationRequest,
+  initializeAttemptState,
+  consumeAttempt,
+  canRetry,
+  attemptLabel,
+} = require('./proxy/request-attempts');
+const {
+  sendAnthropicProxyError,
+  sendModelRouteConfigError,
+  sendAttemptBudgetExhausted,
+  sendFreeModelRateLimitError,
+} = require('./proxy/proxy-errors');
+const {
+  providerHasBaseUrlAndKey,
+  normalizeBaseUrlForMatch,
+  findModelRoute,
+  resolveRoutedProvider,
+  resolveRoutedProviders,
+  getRouteTargetLabel,
+  getRouteCacheProviderId,
+  getNextRouteProvider,
+  shouldRouteFailover,
+  switchToFallbackProvider,
+  providerCanPreserveModelForRateLimitFallback,
+} = require('./proxy/model-routing');
+const {
+  writeClaudeSelectedModel,
+  resolveClaudeSelectedModel,
+  normalizeClaudeModelAlias,
+} = require('./proxy/claude-settings');
+const {
+  normalizeTokenUsage,
+  mergeTokenUsage,
+  extractCompletionTextForUsage,
+} = require('./proxy/token-usage');
+const {
+  tryParseToolCallsFromJsonText,
+  translateOpenAIToAnthropic,
+  AnthropicSSETranslator,
+} = require('./proxy/anthropic-translation');
+const {
+  TIMY_SUPPORTED_MODELS,
+  isTimyProvider,
+  normalizeTimyModel,
+  getTimyUnsupportedModelMessage,
+  isFreeModelProvider,
+  isBlazeApiProvider,
+  isCpassProvider,
+  isAnthropicCompatibleProvider,
+  isFreeModelPlaceholderApiKey,
+  providerHasRealFreeModelApiKey,
+  compactUpstreamErrorText,
+  getRateLimitWaitMs,
+} = require('./proxy/provider-utils');
 
-const { addLog } = require('../middlewares/logger');
+const { addLog } = require('../middleware/logger');
 const {
+  estimateTextTokens,
   estimatePromptTokens,
   pruneMessagesToBudget,
   summarizeMessagesToBudget,
@@ -29,1391 +77,9 @@ const {
 // Verbose debug logging removed for latency performance.
 // Essential logs kept: request line, response status, errors, warnings.
 
-// Connection pools for upstream requests - reuses TCP connections dramatically reducing latency
-const httpAgent = new http.Agent({
-  keepAlive: true,
-  maxSockets: 50,
-  maxFreeSockets: 10,
-  timeout: 300000,
-  freeSocketTimeout: 30000,
-});
-
-const httpsAgent = new https.Agent({
-  keepAlive: true,
-  maxSockets: 50,
-  maxFreeSockets: 10,
-  timeout: 300000,
-  freeSocketTimeout: 30000,
-});
-
-// Lazy connection warmup for NVIDIA NIM — pre-opens a TCP+TLS socket to
-// integrate.api.nvidia.com so the first real request skips DNS + TLS handshake.
-let nvidiaNimWarmedUp = false;
-function warmupNvidiaNimConnection() {
-  if (nvidiaNimWarmedUp) return;
-  nvidiaNimWarmedUp = true;
-  const req = https.request(
-    'https://integrate.api.nvidia.com/v1/models',
-    { method: 'GET', agent: httpsAgent, timeout: 10000 },
-    (res) => { res.resume(); }
-  );
-  req.on('error', () => {});
-  req.on('timeout', () => { req.destroy(); });
-  req.end();
-}
-
 const responseCache = new Map();
 const RESPONSE_CACHE_MAX_ENTRIES = 200;
-const DEFAULT_UPSTREAM_TIMEOUT_MS = 300_000;
-const DEFAULT_NVIDIA_NIM_TIMEOUT_MS = DEFAULT_UPSTREAM_TIMEOUT_MS;
-const DEFAULT_NVIDIA_NIM_SLOW_LOG_MS = 15_000;
-const FREEMODEL_RATE_LIMIT_DEFAULT_WAIT_MS = 5_000;
-const FREEMODEL_RATE_LIMIT_MAX_WAIT_MS = 65_000;
 const FREEMODEL_RATE_LIMIT_MAX_RETRIES = 2;
-const claudeSettingsCache = new Map();
-
-// ── NVIDIA NIM Client-Side Rate Limiter ──────────────────────────────────────
-// Proactively enforces RPM limit per model so requests never reach the
-// upstream quota wall. Limit is configurable via env var; default is 35 RPM.
-const NVIDIA_NIM_RPM_LIMIT = (() => { const v = parseInt(process.env.NVIDIA_NIM_RPM_LIMIT, 10); return Number.isFinite(v) && v > 0 ? v : 35; })();
-
-class NvidiaNimRateLimiter {
-  constructor(rpmLimit) {
-    this.rpmLimit = rpmLimit;
-    this._rpm = new Map(); // model -> sorted ms timestamps (last 60s)
-  }
-
-  _get(map, model, cutoff) {
-    const times = (map.get(model) || []).filter(t => t > cutoff);
-    map.set(model, times);
-    return times;
-  }
-
-  /**
-   * Acquire a rate-limit slot for the given model.
-   * - If the per-minute quota is full: waits transparently until the next slot
-   *   opens, then records and returns { blocked: false }.
-   * - Otherwise: records immediately and returns { blocked: false }.
-   */
-  async acquire(model) {
-    // Loop until a slot is available — handles concurrent waiters that all
-    // wake up at the same time and would otherwise all push past the limit.
-    while (true) {
-      const rpm = this._get(this._rpm, model, Date.now() - 60_000);
-      if (rpm.length < this.rpmLimit) break;
-      const waitMs = Math.min(rpm[0] + 60_000 - Date.now() + 150, 65_000);
-      console.warn(
-        `[nvidia-nim-limiter] RPM limit (${this.rpmLimit}/min) reached for "${model}"; ` +
-        `queuing request for ${(waitMs / 1000).toFixed(1)}s`
-      );
-      await new Promise(resolve => setTimeout(resolve, waitMs));
-    }
-
-    const ts = Date.now();
-    this._get(this._rpm, model, ts - 60_000).push(ts);
-    return { blocked: false };
-  }
-
-  /** Returns current usage stats for a model (for logging / debugging). */
-  stats(model) {
-    const now = Date.now();
-    return {
-      rpmUsed:  this._get(this._rpm, model, now - 60_000).length,
-      rpmLimit: this.rpmLimit,
-    };
-  }
-}
-
-const nvidiaNimLimiter = new NvidiaNimRateLimiter(NVIDIA_NIM_RPM_LIMIT);
-
-function getClaudeSettingsPath() {
-  const configDir = process.env.CLAUDE_CONFIG_DIR ||
-    (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.claude') : null) ||
-    (process.env.HOME ? path.join(process.env.HOME, '.claude') : null);
-  return configDir ? path.join(configDir, 'settings.json') : null;
-}
-
-function readClaudeSettings() {
-  const settingsPath = getClaudeSettingsPath();
-  if (!settingsPath) return null;
-
-  let stat;
-  try {
-    stat = fs.statSync(settingsPath);
-  } catch {
-    claudeSettingsCache.delete(settingsPath);
-    return null;
-  }
-
-  const cached = claudeSettingsCache.get(settingsPath);
-  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.settings;
-
-  try {
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings });
-    return settings;
-  } catch (err) {
-    console.warn(`[proxy] Failed to read Claude settings from ${settingsPath}: ${err.message}`);
-    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings: null });
-    return null;
-  }
-}
-
-function writeClaudeSelectedModel(accessKey, model) {
-  const settingsPath = getClaudeSettingsPath();
-  const settings = readClaudeSettings();
-  if (!settingsPath || !settings || typeof settings !== 'object') return false;
-
-  const settingsToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
-  if (!accessKey || settingsToken !== accessKey) return false;
-
-  const selectedModel = typeof model === 'string' ? model.trim() : '';
-  if (!selectedModel) return false;
-
-  settings.model = selectedModel;
-
-  try {
-    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
-    const stat = fs.statSync(settingsPath);
-    claudeSettingsCache.set(settingsPath, { mtimeMs: stat.mtimeMs, settings });
-    return true;
-  } catch (err) {
-    console.warn(`[proxy] Failed to write Claude selected model to ${settingsPath}: ${err.message}`);
-    claudeSettingsCache.delete(settingsPath);
-    return false;
-  }
-}
-
-function resolveClaudeSelectedModel(accessKey) {
-  const settings = readClaudeSettings();
-  if (!settings || typeof settings !== 'object') return null;
-
-  const settingsToken = settings.env?.ANTHROPIC_AUTH_TOKEN;
-  if (!accessKey || settingsToken !== accessKey) return null;
-
-  const model = typeof settings.model === 'string' ? settings.model.trim() : '';
-  return normalizeClaudeModelAlias(model) || null;
-}
-
-function normalizeClaudeModelAlias(model) {
-  if (!model || typeof model !== 'string') return model;
-
-  const normalized = model.trim();
-
-  // Short alias: --model sonnet  →  claude-sonnet-4-6 (standard)
-  if (/^\.?sonnet$/i.test(normalized)) {
-    return 'claude-sonnet-4-6';
-  }
-
-  // 1M-context alias: --model sonnet[1m]  →  claude-sonnet-4.6
-  if (/^\.?sonnet\[1m\]$/i.test(normalized)) {
-    return 'claude-sonnet-4.6';
-  }
-
-  // Claude Code /model → Sonnet 4.6 (standard): claude-sonnet-4-6, claude-sonnet-4.6, claude-sonnet-4-6-20250514
-  if (/^claude-sonnet-4[-.]6(?:-\d{8})?$/i.test(normalized)) {
-    return 'claude-sonnet-4-6';
-  }
-
-  // Claude Code /model → Sonnet 4.6 (1M): claude-sonnet-4-6-20250514-1k, claude-sonnet-4.6-1m
-  if (/^claude-sonnet-4[-.]6(?:-\d{8})?-1[km]$/i.test(normalized)) {
-    return 'claude-sonnet-4.6';
-  }
-
-  // Map claude-opus-4.7 to claude-opus-4.6
-  // if (/^claude-opus-4[-.]7$/i.test(normalized)) {
-  //   return 'claude-opus-4.6';
-  // }
-
-  return model;
-}
-
-function getPositiveEnvMs(name, fallback) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-}
-
-function getNvidiaNimTimeoutMs() {
-  return getPositiveEnvMs('NVIDIA_NIM_MAX_LOCAL_WAIT_MS', DEFAULT_NVIDIA_NIM_TIMEOUT_MS);
-}
-
-function getNvidiaNimSlowLogMs() {
-  return getPositiveEnvMs('NVIDIA_NIM_SLOW_LOG_MS', DEFAULT_NVIDIA_NIM_SLOW_LOG_MS);
-}
-
-function warnSlowNvidiaNimRequest({ phase, elapsedMs, model, providerName }) {
-  const thresholdMs = getNvidiaNimSlowLogMs();
-  if (!Number.isFinite(elapsedMs) || elapsedMs < thresholdMs) return;
-  console.warn(
-    `[proxy] Slow NVIDIA NIM ${phase}: ${elapsedMs}ms` +
-    ` for model "${model || 'unknown'}"` +
-    ` on ${providerName || 'NVIDIA NIM'}`
-  );
-}
-
-function toTokenCount(value) {
-  const count = Number(value);
-  return Number.isFinite(count) && count >= 0 ? count : null;
-}
-
-function firstTokenCount(...values) {
-  for (const value of values) {
-    const count = toTokenCount(value);
-    if (count !== null) return count;
-  }
-  return null;
-}
-
-function hasTokenUsageFields(usage) {
-  if (!usage || typeof usage !== 'object') return false;
-  return firstTokenCount(
-    usage.prompt_tokens,
-    usage.input_tokens,
-    usage.promptTokens,
-    usage.inputTokens,
-    usage.completion_tokens,
-    usage.output_tokens,
-    usage.completionTokens,
-    usage.outputTokens,
-    usage.total_tokens,
-    usage.totalTokens
-  ) !== null;
-}
-
-function normalizeTokenUsage(source = {}) {
-  const usage = [
-    source?.usage,
-    source?.message?.usage,
-    source?.choices?.[0]?.usage,
-    source,
-  ].find(hasTokenUsageFields) || {};
-
-  const promptTokens = firstTokenCount(
-    usage.prompt_tokens,
-    usage.input_tokens,
-    usage.promptTokens,
-    usage.inputTokens
-  );
-  const completionTokens = firstTokenCount(
-    usage.completion_tokens,
-    usage.output_tokens,
-    usage.completionTokens,
-    usage.outputTokens
-  );
-  const explicitTotal = firstTokenCount(usage.total_tokens, usage.totalTokens);
-  const hasSplitUsage = promptTokens !== null || completionTokens !== null;
-  const totalTokens = explicitTotal ?? (hasSplitUsage ? (promptTokens || 0) + (completionTokens || 0) : 0);
-
-  return {
-    promptTokens: promptTokens || 0,
-    completionTokens: completionTokens || 0,
-    totalTokens,
-    hasUsage: explicitTotal !== null || hasSplitUsage,
-    hasExplicitTotal: explicitTotal !== null,
-  };
-}
-
-function mergeTokenUsage(current, next) {
-  if (!next?.hasUsage) return current;
-  const promptTokens = next.promptTokens || current.promptTokens || 0;
-  const completionTokens = next.completionTokens || current.completionTokens || 0;
-  const splitTotal = promptTokens + completionTokens;
-
-  return {
-    promptTokens,
-    completionTokens,
-    totalTokens: next.hasExplicitTotal ? next.totalTokens : Math.max(splitTotal, next.totalTokens || 0, current.totalTokens || 0),
-    hasUsage: true,
-    hasExplicitTotal: next.hasExplicitTotal || current.hasExplicitTotal || false,
-  };
-}
-/**
- * normalizeMessages — Ensures the messages array conforms to expectations
- * of common OpenAI-style upstreams, even if the client is Anthropic-style.
- * Also handles turn-merging for Gemini-based upstreams.
- */
-function normalizeMessages(messages, targetModel = '') {
-  if (!Array.isArray(messages)) return messages;
-
-  const isGemini = targetModel.toLowerCase().includes('gemini') || 
-                   targetModel.toLowerCase().includes('google') ||
-                   targetModel.toLowerCase().includes('google/');
-
-  const stripCacheControl = (value) => {
-    if (!value || typeof value !== 'object') return value;
-    const cleanValue = { ...value };
-    delete cleanValue.cache_control;
-    return cleanValue;
-  };
-
-  // Phase 1: Basic cleaning and format conversion (Anthropic -> OpenAI & Legacy -> Modern)
-  let cleaned = [];
-  for (const msg of messages) {
-    const cleanMsg = stripCacheControl(msg);
-    if (Array.isArray(cleanMsg.content)) {
-      cleanMsg.content = cleanMsg.content.map((block) => stripCacheControl(block));
-    }
-    if (Array.isArray(cleanMsg.tool_calls)) {
-      cleanMsg.tool_calls = cleanMsg.tool_calls.map((toolCall) => {
-        const cleanToolCall = stripCacheControl(toolCall);
-        if (cleanToolCall?.function && typeof cleanToolCall.function === 'object') {
-          cleanToolCall.function = stripCacheControl(cleanToolCall.function);
-        }
-        return cleanToolCall;
-      });
-    }
-
-    const { role, content, tool_calls, function_call, name, tool_call_id } = cleanMsg;
-
-    // 1. Anthropic-style assistant content array
-    if ((role === 'assistant' || role === 'model') && Array.isArray(content)) {
-      const textBlocks = content.filter(b => b.type === 'text');
-      const toolUseBlocks = content.filter(b => b.type === 'tool_use');
-      const thinkingBlocks = content.filter(b => b.type === 'thinking');
-
-      let textContent = textBlocks.map(b => b.text).join('\n').trim();
-      const thinkingContent = thinkingBlocks.map(b => b.thinking || b.text).join('\n').trim();
-      
-      if (thinkingContent) {
-        textContent = `<think>\n${thinkingContent}\n</think>\n\n${textContent}`.trim();
-      }
-
-      const toolCalls = toolUseBlocks.map(b => ({
-        id: b.id || `call_${Math.random().toString(36).slice(2, 11)}`,
-        type: 'function',
-        function: {
-          name: b.name,
-          arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input || {})
-        }
-      }));
-
-      cleaned.push({
-        role: 'assistant',
-        content: toolCalls.length > 0 ? null : (textContent || ' '),
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        reasoning_content: thinkingContent || undefined
-      });
-    } 
-    // 2. Anthropic-style user tool_result
-    else if (role === 'user' && Array.isArray(content) && content.some(b => b.type === 'tool_result')) {
-      for (const block of content) {
-        if (block.type === 'tool_result') {
-          // Anthropic tool_result content can be a string OR an array of content blocks.
-          // Extract plain text for maximum compatibility with OpenAI-compat upstreams.
-          let toolContent;
-          if (typeof block.content === 'string') {
-            toolContent = block.content;
-          } else if (Array.isArray(block.content)) {
-            toolContent = block.content
-              .map(b => (b && b.type === 'text' ? b.text : typeof b === 'string' ? b : JSON.stringify(b)))
-              .join('\n');
-          } else {
-            toolContent = JSON.stringify(block.content || 'success');
-          }
-          cleaned.push({
-            role: 'tool',
-            tool_call_id: block.tool_use_id || `call_${Math.random().toString(36).slice(2, 11)}`,
-            name: block.name || undefined,
-            content: toolContent
-          });
-        }
-      }
-      const textBlocks = content.filter(b => b.type === 'text');
-      if (textBlocks.length > 0) {
-        cleaned.push({
-          role: 'user',
-          content: textBlocks.map(b => b.text).join('\n')
-        });
-      }
-    }
-    // 3. Legacy 'function' role or 'tool' role with missing fields
-    else if (role === 'function' || role === 'tool') {
-      cleaned.push({
-        role: 'tool',
-        tool_call_id: tool_call_id || name || `call_${Math.random().toString(36).slice(2, 11)}`,
-        name: name,
-        content: typeof content === 'string' ? content : JSON.stringify(content || 'success')
-      });
-    }
-    // 4. Legacy 'assistant' with function_call -> tool_calls
-    else if ((role === 'assistant' || role === 'model') && function_call && !tool_calls) {
-      const callId = tool_call_id || function_call.name || `call_${Math.random().toString(36).slice(2, 11)}`;
-      cleaned.push({
-        role: 'assistant',
-        content: null, // Gemini requirement: content must be null if tool_calls present
-        tool_calls: [{
-          id: callId,
-          type: 'function',
-          function: function_call
-        }]
-      });
-    }
-    // 5. Standard OpenAI format with minor fixes
-    else {
-      const newMsg = { ...cleanMsg };
-      if (newMsg.role === 'model') newMsg.role = 'assistant';
-      
-      if (Array.isArray(newMsg.content) && newMsg.content.every(b => b.type === 'text')) {
-        newMsg.content = newMsg.content.map(b => b.text).join('\n');
-      }
-      if (newMsg.role === 'assistant' && Array.isArray(newMsg.tool_calls) && newMsg.tool_calls.length > 0) {
-        newMsg.content = null; 
-        newMsg.tool_calls = newMsg.tool_calls.map(tc => ({
-          ...tc,
-          id: tc.id || `call_${Math.random().toString(36).slice(2, 11)}`
-        }));
-      }
-      if (newMsg.role === 'tool' && !newMsg.tool_call_id) {
-        newMsg.tool_call_id = newMsg.name || `call_${Math.random().toString(36).slice(2, 11)}`;
-      }
-      cleaned.push(newMsg);
-    }
-  }
-
-  // Phase 2: Merge Consecutive Same-Role Messages
-  // CRITICAL: Do NOT merge an assistant turn that already has tool_calls with the
-  // next assistant turn — Gemini requires exact 1:1 tool-call-to-response pairing
-  // and merging would change the number of calls without changing the responses.
-  const merged = [];
-  for (const msg of cleaned) {
-    const last = merged[merged.length - 1];
-
-    // System messages: always merge
-    if (last && last.role === 'system' && msg.role === 'system') {
-      last.content = (last.content + '\n' + (msg.content || '')).trim();
-      continue;
-    }
-
-    // Tool messages: never merge (each must stay paired with its call)
-    if (msg.role === 'tool') {
-      merged.push(msg);
-      continue;
-    }
-
-    const canMerge =
-      last &&
-      last.role === msg.role &&
-      last.role !== 'tool' &&
-      // Do NOT merge if the previous assistant turn already has tool_calls
-      !(last.role === 'assistant' && Array.isArray(last.tool_calls) && last.tool_calls.length > 0) &&
-      // Do NOT merge if the incoming assistant turn has tool_calls (would create ambiguity)
-      !(msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0);
-
-    if (canMerge) {
-      // Merge content
-      if (msg.content) {
-        if (typeof last.content === 'string' && typeof msg.content === 'string') {
-          last.content = (last.content + '\n' + msg.content).trim();
-        } else if (!last.content) {
-          last.content = msg.content;
-        }
-      }
-      // Merge tool_calls (only reached for non-assistant-with-tool_calls paths)
-      if (Array.isArray(msg.tool_calls)) {
-        last.tool_calls = [...(last.tool_calls || []), ...msg.tool_calls];
-      }
-      // Merge reasoning_content
-      if (msg.reasoning_content) {
-        last.reasoning_content = (last.reasoning_content ? last.reasoning_content + '\n' : '') + msg.reasoning_content;
-      }
-      continue;
-    }
-
-    merged.push(msg);
-  }
-  cleaned = merged;
-
-  // Phase 2.5: Ensure system message is pushed to the front
-  // If there are multiple system messages left somehow, combine them at the front.
-  // Many models/routers reject requests if system messages are anywhere but the top.
-  let systemContent = '';
-  const withoutSystem = [];
-  for (const msg of cleaned) {
-    if (msg.role === 'system') {
-      systemContent += (systemContent ? '\n' : '') + (msg.content || '');
-    } else {
-      withoutSystem.push(msg);
-    }
-  }
-
-  if (systemContent) {
-    cleaned = [{ role: 'system', content: systemContent }, ...withoutSystem];
-  } else {
-    cleaned = withoutSystem;
-  }
-
-  // Phase 2.6: Ensure conversation starts with a user message.
-  // Pruning (or malformed client input) can leave the first non-system message as
-  // 'assistant' or 'tool', which most upstream APIs reject — sometimes with 504
-  // (gateway timeout) instead of a clean 400. Insert a lightweight bridge turn.
-  {
-    const firstNonSysIdx = cleaned.findIndex(m => m.role !== 'system');
-    if (firstNonSysIdx >= 0 && cleaned[firstNonSysIdx].role !== 'user') {
-      cleaned.splice(firstNonSysIdx, 0, {
-        role: 'user',
-        content: '[Earlier context was trimmed to fit within the context window]',
-      });
-    }
-  }
-
-  // Phase 3: Strict Tool Call/Response Alignment (Gemini-compatible)
-  // Gemini requires that IMMEDIATELY after each assistant turn with N tool_calls,
-  // there are exactly N tool response messages — one per call, in order.
-  //
-  // Strategy: walk cleaned[] in sequence. When we see an assistant+tool_calls turn,
-  // we peek ahead at consecutive `tool` messages that follow it and match them to
-  // tool_call IDs. We never pull responses from later turns.
-
-  const finalMessages = [];
-  let i = 0;
-
-  const normalizeToolContent = (content) => {
-    if (content === null || content === undefined) return '{"status": "success"}';
-    if (typeof content !== 'string') return JSON.stringify(content);
-    // If it's already valid JSON, keep it
-    try { JSON.parse(content); return content; } catch { /* not JSON */ }
-    // Wrap plain text in a JSON object
-    return JSON.stringify({ result: content });
-  };
-
-  while (i < cleaned.length) {
-    const msg = cleaned[i];
-
-    // Sanitize tool_calls on assistant turns
-    if ((msg.role === 'assistant' || msg.role === 'model') && Array.isArray(msg.tool_calls)) {
-      msg.tool_calls = msg.tool_calls.filter(tc => tc && tc.id && tc.function && tc.function.name);
-      if (msg.tool_calls.length === 0) delete msg.tool_calls;
-    }
-
-    finalMessages.push(msg);
-    i++;
-
-    // If this assistant turn has tool calls, collect the tool responses that follow
-    if ((msg.role === 'assistant' || msg.role === 'model') && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-      // Gather ALL consecutive tool messages that immediately follow (in order)
-      const available = [];
-      while (i < cleaned.length && cleaned[i].role === 'tool') {
-        const r = { ...cleaned[i] };
-        if (!r.name) r.name = 'unknown';
-        r.content = normalizeToolContent(r.content);
-        available.push(r);
-        i++;
-      }
-
-      // For each tool call, match by tool_call_id first, then positionally
-      const used = new Set();
-      for (let callIdx = 0; callIdx < msg.tool_calls.length; callIdx++) {
-        const tc = msg.tool_calls[callIdx];
-        const id = tc.id;
-
-        // Try exact ID match among available responses not yet used
-        const matchIdx = available.findIndex((r, ri) => !used.has(ri) && r.tool_call_id === id);
-        if (matchIdx >= 0) {
-          used.add(matchIdx);
-          // Ensure name matches the actual function name (tool_result blocks don't carry name)
-          const matched = { ...available[matchIdx] };
-          if (!matched.name || matched.name === 'unknown') {
-            matched.name = tc.function?.name || 'unknown_function';
-          }
-          finalMessages.push(matched);
-        } else {
-          // Try positional fallback: take the callIdx-th unused available response
-          let positionalFallback = -1;
-          let count = 0;
-          for (let ri = 0; ri < available.length; ri++) {
-            if (!used.has(ri)) {
-              if (count === callIdx) { positionalFallback = ri; break; }
-              count++;
-            }
-          }
-          if (positionalFallback >= 0) {
-            // Fix up the tool_call_id to match this call so Gemini is happy
-            const r = { ...available[positionalFallback], tool_call_id: id };
-            if (!r.name) r.name = tc.function?.name || 'unknown';
-            used.add(positionalFallback);
-            console.warn(`[proxy] ⚠ Positional-matched tool response for id: "${id}" (name: ${tc.function?.name})`);
-            finalMessages.push(r);
-          } else {
-            // No response at all — inject a synthetic one
-            console.warn(`[proxy] ⚠ Injecting synthetic tool response for id: "${id}" (name: ${tc.function?.name})`);
-            finalMessages.push({
-              role: 'tool',
-              tool_call_id: id,
-              name: tc.function?.name || 'unknown_function',
-              content: '{"status": "success"}'
-            });
-          }
-        }
-      }
-
-      // Any leftover available tool responses that didn't match a call: drop them with a warning
-      const orphaned = available.filter((_, ri) => !used.has(ri));
-      if (orphaned.length > 0) {
-        console.warn(`[proxy] ⚠ Dropping ${orphaned.length} orphaned tool response(s) after assistant turn`);
-      }
-    } else if (msg.role === 'tool') {
-      // A tool message outside of an assistant+tool_calls context — drop it
-      console.warn(`[proxy] ⚠ Dropping orphaned tool message (tool_call_id: ${msg.tool_call_id})`);
-      finalMessages.pop(); // undo the push above
-    }
-  }
-
-  // Phase 4: Final Parity Validation
-  // Walk finalMessages and verify every assistant+tool_calls turn is immediately
-  // followed by EXACTLY the right number of tool responses. This is the safety net
-  // that catches any edge case the previous phases may have missed.
-  const validated = [];
-  let j = 0;
-  while (j < finalMessages.length) {
-    const m = finalMessages[j];
-    validated.push(m);
-    j++;
-
-    if ((m.role === 'assistant' || m.role === 'model') && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const expectedCount = m.tool_calls.length;
-      // Count how many consecutive tool messages follow in finalMessages
-      let actualCount = 0;
-      while (j + actualCount < finalMessages.length && finalMessages[j + actualCount].role === 'tool') {
-        actualCount++;
-      }
-
-      if (actualCount === expectedCount) {
-        // Perfect — push them all as-is
-        for (let k = 0; k < actualCount; k++) validated.push(finalMessages[j + k]);
-        j += actualCount;
-      } else if (actualCount > expectedCount) {
-        // Too many responses — keep only the first expectedCount
-        console.warn(`[proxy] Phase4: trimming ${actualCount - expectedCount} excess tool response(s) for ${expectedCount} tool_calls`);
-        for (let k = 0; k < expectedCount; k++) validated.push(finalMessages[j + k]);
-        j += actualCount; // skip all
-      } else {
-        // Too few responses — push what we have and inject synthetics for the rest
-        console.warn(`[proxy] Phase4: injecting ${expectedCount - actualCount} synthetic tool response(s) (have ${actualCount}, need ${expectedCount})`);
-        for (let k = 0; k < actualCount; k++) validated.push(finalMessages[j + k]);
-        j += actualCount;
-        for (let k = actualCount; k < expectedCount; k++) {
-          const tc = m.tool_calls[k];
-          validated.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            name: tc.function?.name || 'unknown_function',
-            content: '{"status": "success"}'
-          });
-        }
-      }
-    }
-  }
-
-  return validated;
-}
-
-/**
- * normalizeTools — Converts Anthropic-style tools to OpenAI-style tools
- */
-function normalizeTools(tools) {
-  if (!Array.isArray(tools)) return tools;
-  return tools
-    .map((t) => {
-      if (!t || typeof t !== 'object') return null;
-
-      // Already OpenAI-style: keep as-is and only ensure defaults.
-      if (t.type === 'function' && t.function && typeof t.function === 'object') {
-        const fnName = t.function.name || t.name;
-        if (!fnName) return null;
-        return {
-          ...t,
-          function: {
-            ...t.function,
-            name: fnName,
-            parameters: t.function.parameters || { type: 'object', properties: {} },
-          },
-        };
-      }
-
-      // OpenAI variant used by some clients: { type: 'function', name, parameters }
-      if (t.type === 'function' && t.name) {
-        return {
-          type: 'function',
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters || t.input_schema || { type: 'object', properties: {} },
-          },
-        };
-      }
-
-      // Anthropic-style tool => convert to OpenAI function tool.
-      if (t.name) {
-        return {
-          type: 'function',
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.input_schema || { type: 'object', properties: {} },
-          },
-        };
-      }
-
-      return null;
-    })
-    .filter(Boolean);
-}
-
-/**
- * normalizeToolChoice — Converts Anthropic-style tool_choice to OpenAI-style
- */
-function normalizeToolChoice(toolChoice) {
-  if (!toolChoice) return undefined;
-  if (typeof toolChoice === 'string') return toolChoice;
-  
-  if (toolChoice.type === 'auto') return 'auto';
-  if (toolChoice.type === 'any' || toolChoice.type === 'required') return 'required';
-  if (toolChoice.type === 'tool' && toolChoice.name) {
-    return {
-      type: 'function',
-      function: { name: toolChoice.name }
-    };
-  }
-  return toolChoice;
-}
-
-/**
- * normalizeSystemPrompt — Converts Anthropic-style `system` into an
- * OpenAI-compatible system message for non-Anthropic upstreams.
- */
-function normalizeSystemPrompt(system) {
-  if (!system) return null;
-
-  if (typeof system === 'string') {
-    return system.trim() ? system : null;
-  }
-
-  if (Array.isArray(system)) {
-    const text = system
-      .map((block) => (block && typeof block === 'object' ? block.text || '' : ''))
-      .join('')
-      .trim();
-    return text || null;
-  }
-
-  return null;
-}
-
-/**
- * translateOpenAIToAnthropic — Converts OpenAI chat completion response
- * to Anthropic message response format.
- */
-function translateOpenAIToAnthropic(openaiRes, model) {
-  const choice = openaiRes.choices?.[0];
-  const message = choice?.message;
-  
-  const content = [];
-  if (message?.content) {
-    content.push({ type: 'text', text: message.content });
-  }
-  
-  if (message?.tool_calls) {
-    for (const tc of message.tool_calls) {
-      try {
-        content.push({
-          type: 'tool_use',
-          id: tc.id,
-          name: tc.function.name,
-          input: typeof tc.function.arguments === 'string' 
-            ? JSON.parse(tc.function.arguments || '{}') 
-            : tc.function.arguments
-        });
-      } catch (e) {
-        console.error('[proxy] Failed to parse tool arguments:', e.message);
-      }
-    }
-  }
-  
-  let stopReason = 'end_turn';
-  const fr = choice?.finish_reason;
-  if (fr === 'tool_calls' || fr === 'function_call') stopReason = 'tool_use';
-  else if (fr === 'stop') stopReason = 'end_turn';
-  else if (fr === 'length') stopReason = 'max_tokens';
-
-  return {
-    id: openaiRes.id || `msg_local_${Math.random().toString(36).slice(2, 11)}`,
-    type: 'message',
-    role: 'assistant',
-    model: model,
-    content: content,
-    stop_reason: stopReason,
-    stop_sequence: null,
-    usage: (() => {
-      const usage = normalizeTokenUsage(openaiRes);
-      return {
-        input_tokens: usage.promptTokens,
-        output_tokens: usage.completionTokens,
-      };
-    })()
-  };
-}
-
-
-/**
- * AnthropicSSETranslator — Internal utility to map OpenAI-style SSE
- * chunk stream into the specific event sequence Anthropic clients expect.
- */
-class AnthropicSSETranslator {
-  constructor(res, model) {
-    this.res = res;
-    this.model = model;
-    this.sentMessageStart = false;
-    this.hasThinking = false;
-    this.hasText = false;
-    this.currentBlockIndex = 0;
-    this.activeToolBlocks = new Map(); // index -> { id, name }
-  }
-
-  start() {
-    if (this.sentMessageStart) return;
-    // console.log('[SSE] → message_start');
-    this.res.write('event: message_start\n');
-    this.res.write(`data: ${JSON.stringify({
-      type: 'message_start',
-      message: {
-        id: `msg_local_${Math.random().toString(36).slice(2, 11)}`,
-        type: 'message',
-        role: 'assistant',
-        model: this.model,
-        content: [],
-        stop_reason: null,
-        stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0 }
-      }
-    })}\n\n`);
-
-    // Claude CLI often requires an early ping
-    this.res.write('event: ping\n');
-    this.res.write('data: {"type": "ping"}\n\n');
-    this.sentMessageStart = true;
-  }
-
-  pushDelta(text = '', thinking = '') {
-    if (!this.sentMessageStart) this.start();
-
-    // Convert thinking into normal text wrapped in <think> tags for client compatibility
-    if (thinking) {
-      if (!this.hasText) {
-        this.res.write('event: content_block_start\n');
-        this.res.write(`data: ${JSON.stringify({
-          type: 'content_block_start',
-          index: this.currentBlockIndex,
-          content_block: { type: 'text', text: '' }
-        })}\n\n`);
-        this.hasText = true;
-      }
-      
-      if (!this.hasThinking) {
-        this.res.write('event: content_block_delta\n');
-        this.res.write(`data: ${JSON.stringify({
-          type: 'content_block_delta',
-          index: this.currentBlockIndex,
-          delta: { type: 'text_delta', text: '<think>\n' }
-        })}\n\n`);
-        this.hasThinking = true;
-      }
-      
-      this.res.write('event: content_block_delta\n');
-      this.res.write(`data: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: this.currentBlockIndex,
-        delta: { type: 'text_delta', text: thinking }
-      })}\n\n`);
-    }
-
-    // Handle normal text
-    if (text) {
-      if (!this.hasText) {
-        this.res.write('event: content_block_start\n');
-        this.res.write(`data: ${JSON.stringify({
-          type: 'content_block_start',
-          index: this.currentBlockIndex,
-          content_block: { type: 'text', text: '' }
-        })}\n\n`);
-        this.hasText = true;
-      }
-      
-      if (this.hasThinking) {
-        // Close thinking tag
-        this.res.write('event: content_block_delta\n');
-        this.res.write(`data: ${JSON.stringify({
-          type: 'content_block_delta',
-          index: this.currentBlockIndex,
-          delta: { type: 'text_delta', text: '\n</think>\n\n' }
-        })}\n\n`);
-        this.hasThinking = false;
-      }
-
-      this.res.write('event: content_block_delta\n');
-      this.res.write(`data: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: this.currentBlockIndex,
-        delta: { type: 'text_delta', text }
-      })}\n\n`);
-    }
-  }
-
-  pushToolCallDelta(toolCall) {
-    if (!this.sentMessageStart) this.start();
-
-    // If there is an active text/thinking block, it should be considered closed when tools arrive
-    if (this.hasThinking || this.hasText) {
-      this.res.write('event: content_block_stop\n');
-      this.res.write(`data: ${JSON.stringify({ type: 'content_block_stop', index: this.currentBlockIndex })}\n\n`);
-      this.hasThinking = false;
-      this.hasText = false;
-    }
-
-    const { index, id, function: fn } = toolCall;
-    
-    // Anthropic tool_use usually starts after text
-    const anthropicIndex = index + this.currentBlockIndex + 1;
-
-    if (!this.activeToolBlocks.has(index)) {
-      const toolId = id || `toolu_local_${Math.random().toString(36).slice(2, 11)}`;
-      const name = fn?.name || 'unknown_tool';
-      
-      this.activeToolBlocks.set(index, { id: toolId, name });
-
-      this.res.write('event: content_block_start\n');
-      this.res.write(`data: ${JSON.stringify({
-        type: 'content_block_start',
-        index: anthropicIndex,
-        content_block: { type: 'tool_use', id: toolId, name, input: {} }
-      })}\n\n`);
-    }
-
-    if (fn?.arguments) {
-      this.res.write('event: content_block_delta\n');
-      this.res.write(`data: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: anthropicIndex,
-        delta: { type: 'input_json_delta', partial_json: fn.arguments }
-      })}\n\n`);
-    }
-  }
-
-  finish(stopReason = 'end_turn', usage = {}) {
-    if (!this.sentMessageStart) this.start();
-
-    // Close thinking tag if it was left open!
-    if (this.hasThinking) {
-      this.res.write('event: content_block_delta\n');
-      this.res.write(`data: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: this.currentBlockIndex,
-        delta: { type: 'text_delta', text: '\n</think>\n' }
-      })}\n\n`);
-      this.hasThinking = false;
-    }
-
-    // If we had tool calls, the stop reason should be 'tool_use'
-    if (this.activeToolBlocks.size > 0 && stopReason === 'end_turn') {
-      stopReason = 'tool_use';
-    }
-
-    if (this.hasThinking || this.hasText) {
-      this.res.write('event: content_block_stop\n');
-      this.res.write(`data: ${JSON.stringify({ type: 'content_block_stop', index: this.currentBlockIndex })}\n\n`);
-    }
-
-    // Also stop any tool blocks
-    for (const [index] of this.activeToolBlocks) {
-      this.res.write('event: content_block_stop\n');
-      this.res.write(`data: ${JSON.stringify({ type: 'content_block_stop', index: index + this.currentBlockIndex + 1 })}\n\n`);
-    }
-
-    this.res.write('event: message_delta\n');
-    this.res.write(`data: ${JSON.stringify({
-      type: 'message_delta',
-      delta: { stop_reason: stopReason, stop_sequence: null },
-      usage: {
-        input_tokens: usage.promptTokens || 0,
-        output_tokens: usage.completionTokens || 0,
-      }
-    })}\n\n`);
-
-    this.res.write('event: message_stop\n');
-    this.res.write('data: {"type": "message_stop"}\n\n');
-    // console.log('[SSE] → message_stop');
-  }
-}
-
-
-/**
- * Build Axios request options for the upstream API.
- * Always uses the active provider's baseUrl and apiKey.
- */
-function buildUpstreamRequest(req, baseUrl, apiKey) {
-  // Build CLEAN headers — do NOT spread req.headers.
-  const headers = {
-    'content-type': 'application/json',
-    'accept': 'application/json, text/event-stream',
-  };
-
-  if (apiKey && !(isFreeModelProvider(baseUrl) && isFreeModelPlaceholderApiKey(apiKey))) {
-    headers['authorization'] = `Bearer ${apiKey}`;
-  }
-
-  // Bypassing AgentRouter 'unauthorized client' detection.
-  if (baseUrl.includes('agentrouter')) {
-    headers['originator'] = 'codex_cli_rs';
-    headers['version'] = '0.101.0';
-    headers['user-agent'] = 'codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464';
-  }
-
-  const isGitHubModels = baseUrl.includes('models.github.ai') || baseUrl.includes('models.inference.ai.azure.com') || (baseUrl.includes('api.github.com') && req.path.includes('/models'));
-
-  // GitHub Models requires specific GitHub API headers
-    if (isGitHubModels) {
-      const isStreamingReq = req.body?.stream === true;
-      headers['accept'] = isStreamingReq ? 'text/event-stream' : 'application/vnd.github+json';
-      headers['x-github-api-version'] = '2022-11-28';
-      // console.log(`[proxy] GitHub Models: adding GitHub API headers (streaming=${isStreamingReq})`);
-    }
-
-  // ── Path handling ───────────────────────────────────────────
-  let upstreamPath = req.path; // e.g., "/messages" or "/chat/completions"
-  
-  // Normalization: Map Anthropic's /messages to OpenAI's /chat/completions if upstream is not Anthropic
-  const isAnthropic = baseUrl.includes('anthropic.com');
-  const isEcom = baseUrl.includes('ecom');
-  const isCopilotBridge = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
-  const isNvidiaNimRequest = req.__startedOnNvidiaNim === true ||
-    req.__upstreamProviderIsNvidiaNim === true ||
-    isNvidiaNimValue(baseUrl);
-  // NIM is OpenAI-compatible for chat generation. Sending Anthropic /messages
-  // payloads through unchanged can surface Python/vLLM errors such as
-  // "unhashable type: 'dict'" when fields like tool_choice are objects.
-  const useNativeNvidiaMessages = false;
-  req.__nativeNvidiaNimMessages = useNativeNvidiaMessages;
-  if (isCopilotBridge) {
-    headers['x-ai-bridge-upstream-hop'] = '1';
-  }
-
-  if (upstreamPath.endsWith('/messages') && !isAnthropic && !isCopilotBridge && !useNativeNvidiaMessages) {
-    // console.log(`[proxy] Mapping /messages → /chat/completions for ${isEcom ? 'ecom' : 'OpenAI-compatible'} upstream`);
-    upstreamPath = upstreamPath.replace('/messages', '/chat/completions');
-  }
-
-  let cleanBaseUrl = baseUrl.replace(/\/+$/, '');
-  if (isNvidiaNimRequest) {
-    cleanBaseUrl = cleanBaseUrl
-      .replace(/\/v1\/chat\/completions$/i, '/v1')
-      .replace(/\/chat\/completions$/i, '');
-  }
-
-  if (isGitHubModels) {
-    // GitHub Models API uses /inference prefix instead of /v1
-    // 1. Strip /v1 from baseUrl if it was accidentally included
-    cleanBaseUrl = cleanBaseUrl.replace(/\/v1$/, '');
-
-    // 2. Map /v1/... to /inference/...
-    upstreamPath = upstreamPath.replace(/^\/v1/, '');
-    if (!upstreamPath.startsWith('/inference')) {
-      upstreamPath = '/inference' + (upstreamPath.startsWith('/') ? upstreamPath : '/' + upstreamPath);
-    }
-  } else if (!cleanBaseUrl.endsWith('/v1') && !upstreamPath.startsWith('/v1')) {
-    // Prepend /v1 if it's missing from both baseUrl and the path
-    upstreamPath = '/v1' + (upstreamPath.startsWith('/') ? upstreamPath : '/' + upstreamPath);
-  } else if (!upstreamPath.startsWith('/')) {
-    upstreamPath = '/' + upstreamPath;
-  }
-
-  const upstreamUrl = `${cleanBaseUrl}${upstreamPath}`;
-
-  // ── Build / Sanitize Request Body ────────────────────────────────────────
-  let bodyData = req.body;
-  if (bodyData && typeof bodyData === 'object') {
-    bodyData = { ...bodyData };
-    // Normalization: Ensure valid messages for common upstreams
-    if (!useNativeNvidiaMessages && bodyData.messages) {
-      // Restore original (pre-normalization) messages on retry so we don't
-      // double-normalize — previous calls may have mutated req.body.messages
-      // in-place (e.g. injected synthetic tool responses).
-      const rawMessages = req.__originalMessages || bodyData.messages;
-      if (!req.__originalMessages) {
-        // Deep-clone and stash once so every retry starts from clean client input
-        try { req.__originalMessages = JSON.parse(JSON.stringify(bodyData.messages)); } catch { /* ignore */ }
-      }
-      bodyData.messages = JSON.parse(JSON.stringify(rawMessages));
-
-      // 1. If upstream is not Anthropic, move the Anthropic 'system' field into the messages array first
-      // so it can be normalized and merged by normalizeMessages.
-      if (!baseUrl.includes('anthropic.com')) {
-        const systemPrompt = normalizeSystemPrompt(bodyData.system);
-        if (systemPrompt) {
-          bodyData.messages = [...bodyData.messages];
-          bodyData.messages.unshift({ role: 'system', content: systemPrompt });
-          delete bodyData.system;
-        }
-      }
-
-      // 2. Perform comprehensive normalization (alignment, turn merging, format conversion)
-      const originalCount = bodyData.messages?.length || 0;
-      bodyData.messages = normalizeMessages(bodyData.messages, bodyData.model);
-      
-      // DIAGNOSTIC LOGGING — enabled for any Gemini-routed request
-      const isGeminiModel = bodyData.model && (
-        bodyData.model.toLowerCase().includes('gemini') ||
-        bodyData.model.toLowerCase().includes('google')
-      );
-      if (baseUrl.includes('qwqtao') || baseUrl.includes('tao') || isGeminiModel) {
-        // console.log(`[proxy-debug] Upstream model: ${bodyData.model} → ${baseUrl}`);
-        bodyData.messages.forEach((m, i) => {
-          const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls.length : 0;
-          const isTool = m.role === 'tool' ? 1 : 0;
-          const tcIds = Array.isArray(m.tool_calls) ? m.tool_calls.map(tc => tc.id).join(',') : '';
-          // console.log(`  msg[${i}] role=${m.role} content=${typeof m.content === 'string' ? m.content.slice(0, 30) + '...' : (m.content === null ? 'null' : '?')} tool_calls=${toolCalls}${tcIds ? ` [${tcIds}]` : ''} is_tool_resp=${isTool}${isTool ? ` id=${m.tool_call_id} name=${m.name}` : ''}`);
-        });
-      }
-    }
-
-    // Normalization: Convert tools and tool_choice if upstream is not Anthropic
-    if (!useNativeNvidiaMessages && !baseUrl.includes('anthropic.com')) {
-      if (bodyData.tools) {
-        bodyData.tools = normalizeTools(bodyData.tools);
-      }
-      if (bodyData.tool_choice) {
-        bodyData.tool_choice = normalizeToolChoice(bodyData.tool_choice);
-      }
-      
-      // (bodyData.system already deleted above if present)
-    }
-
-
-    // Remove Anthropic-specific fields that cause 503 on non-Anthropic upstreams
-    if (!useNativeNvidiaMessages) {
-      const FIELDS_TO_REMOVE = [
-        'thinking', 'betas', 'top_k', 'context_management', 'output_config', 'metadata'
-      ];
-      FIELDS_TO_REMOVE.forEach(f => delete bodyData[f]);
-    }
-
-    if (isNvidiaNimRequest && !useNativeNvidiaMessages) {
-      sanitizeNvidiaNimRequestBody(bodyData, { preserveTools: req.__nvidiaNimStripTools !== true });
-    }
-
-    // FreeModel: strip tools and flatten tool-call history.
-    // api.freemodel.dev is a free, limited API that rejects requests with tool
-    // definitions or tool-call/tool-result turns. After the first response,
-    // Claude CLI includes its built-in tools on every subsequent request, which
-    // causes FreeModel to return an error. We strip all tool-related fields and
-    // flatten tool turns into plain-text so the conversation history stays valid.
-    if (isFreeModelProvider(baseUrl)) {
-      // FreeModel returns 401 on streaming requests — force non-streaming
-      bodyData.stream = false;
-      delete bodyData.tools;
-      delete bodyData.tool_choice;
-      if (Array.isArray(bodyData.messages)) {
-        // Pass 1: Remove tool-role messages and flatten tool_calls turns
-        bodyData.messages = bodyData.messages
-          .map((msg) => {
-            if (!msg || typeof msg !== 'object') return null;
-            // Drop pure tool-result turns (role === 'tool')
-            if (msg.role === 'tool') return null;
-
-            // Handle Anthropic-format: assistant with content array containing tool_use blocks
-            if ((msg.role === 'assistant' || msg.role === 'model') && Array.isArray(msg.content)) {
-              const textBlocks = msg.content.filter(b => b && b.type === 'text');
-              const hasToolUse = msg.content.some(b => b && b.type === 'tool_use');
-              if (hasToolUse) {
-                const textContent = textBlocks.map(b => b.text).join('\n').trim();
-                return {
-                  role: 'assistant',
-                  content: textContent || '[tool call omitted]',
-                };
-              }
-            }
-
-            // Handle Anthropic-format: user with content array containing tool_result blocks.
-            // Keep any text blocks; if nothing remains, drop the message entirely.
-            if (msg.role === 'user' && Array.isArray(msg.content)) {
-              const hasToolResult = msg.content.some(b => b && b.type === 'tool_result');
-              if (hasToolResult) {
-                const textBlocks = msg.content.filter(b => b && b.type === 'text');
-                if (textBlocks.length === 0) return null;
-                return { role: 'user', content: textBlocks.map(b => b.text).join('\n').trim() };
-              }
-              // Flatten plain text-only content arrays to a string
-              const allText = msg.content.every(b => b && b.type === 'text');
-              if (allText) {
-                return { role: 'user', content: msg.content.map(b => b.text).join('\n').trim() };
-              }
-            }
-
-            // Handle OpenAI-format: assistant turns with tool_calls array
-            if ((msg.role === 'assistant' || msg.role === 'model') &&
-                Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-              const textContent = typeof msg.content === 'string' ? msg.content.trim() : '';
-              return {
-                role: 'assistant',
-                content: textContent || '[tool call omitted]',
-              };
-            }
-            // Strip tool_calls from assistant turns that have both text + tool calls
-            if (msg.tool_calls) {
-              const { tool_calls, ...rest } = msg;
-              return rest;
-            }
-            return msg;
-          })
-          .filter(Boolean);
-
-        // Pass 2: Collapse consecutive same-role turns (stripping can create them)
-        const collapsed = [];
-        for (const msg of bodyData.messages) {
-          const last = collapsed[collapsed.length - 1];
-          if (last && last.role === msg.role && msg.role !== 'tool' && typeof last.content === 'string' && typeof msg.content === 'string') {
-            last.content = (last.content + '\n' + msg.content).trim();
-          } else {
-            collapsed.push({ ...msg });
-          }
-        }
-        bodyData.messages = collapsed;
-
-        // Pass 3: Ensure conversation starts with a user message (not assistant)
-        const firstNonSys = bodyData.messages.findIndex(m => m.role !== 'system');
-        if (firstNonSys >= 0 && bodyData.messages[firstNonSys].role !== 'user') {
-          bodyData.messages.splice(firstNonSys, 0, {
-            role: 'user',
-            content: '[Context continued]',
-          });
-        }
-
-        // Pass 4: Ensure messages array is non-empty
-        // Note: Do NOT add a fake user message at the end - this corrupts conversation history
-        // and causes FreeModel to stop responding after the first turn.
-        if (bodyData.messages.length === 0) {
-          bodyData.messages = [{ role: 'user', content: 'Hello' }];
-        }
-      }
-    }
-  }
-
-  // EcomAgent only supports: claude-opus-4-6, claude-opus-4.6, mmodel, claudex-4.7-5.4
-  // Map ALL claude variants to claude-opus-4.6 (dot-notation required).
-  // Sonnet, haiku, and any other claude model are NOT available on EcomAgent.
-  if (isEcom && bodyData?.model && req.__skipModelMappingForRateLimitFallback !== true && req.__strictProviderRouting !== true) {
-    const originalEcomModel = bodyData.model;
-    // If it's any claude model that isn't already opus-4.6, remap to opus
-    if (/claude/i.test(bodyData.model)) {
-      bodyData.model = bodyData.model
-        // First normalise hyphens → dots for opus-4.6
-        .replace(/claude-opus-4-6/g, 'claude-opus-4.6')
-        // Map claude-opus-4-7 / claude-opus-4.7 (new Opus 4.7 CLI default) → opus-4.6
-        .replace(/claude-opus-4[-.]7[\w.-]*/g, 'claude-opus-4.6')
-        // Map sonnet (any variant) → opus
-        .replace(/claude-sonnet-[\w.-]+/g, 'claude-opus-4.6')
-        // Map haiku (any variant) → opus
-        .replace(/claude-haiku[\w.-]*/g, 'claude-opus-4.6')
-        // Map claude-3 legacy models → opus
-        .replace(/claude-3[-\w.]*sonnet[\w.-]*/g, 'claude-opus-4.6')
-        .replace(/claude-3[-\w.]*haiku[\w.-]*/g, 'claude-opus-4.6')
-        .replace(/claude-3[-\w.]*opus[\w.-]*/g, 'claude-opus-4.6');
-    }
-    if (originalEcomModel !== bodyData.model) {
-      // console.log(`[proxy] EcomAgent model remap: ${originalEcomModel} → ${bodyData.model}`);
-    } else {
-      // console.log(`[proxy] EcomAgent model name → ${bodyData.model}`);
-    }
-  }
-
-  // Clamp max_tokens for NVIDIA NIM only — NIM rejects very large values
-  // Kimi K2 supports up to 131072 output tokens; other NIM models cap at 8192
-  if (isNvidiaNimRequest && bodyData?.max_tokens) {
-    const isKimiModel = typeof bodyData.model === 'string' && /kimi/i.test(bodyData.model);
-    const nimMaxTokens = isKimiModel ? 131072 : 8192;
-    if (bodyData.max_tokens > nimMaxTokens) bodyData.max_tokens = nimMaxTokens;
-  }
-
-  if (
-    bodyData?.stream === true &&
-    upstreamPath.includes('/chat/completions') &&
-    !isAnthropic &&
-    !useNativeNvidiaMessages
-  ) {
-    bodyData.stream_options = {
-      ...(bodyData.stream_options || {}),
-      include_usage: true,
-    };
-  }
-
-
-  // console.log(`[proxy] → ${req.method} ${upstreamUrl}${req.query ? '?' + new URLSearchParams(req.query) : ''}`);
-
-  // Select agent based on URL protocol
-  const agent = upstreamUrl.startsWith('http:') ? httpAgent : httpsAgent;
-
-  return {
-    method: req.method,
-    url: upstreamUrl,
-    headers,
-    data: bodyData,
-    responseType: 'stream',
-    decompress: true,
-    timeout: isNvidiaNimRequest ? getNvidiaNimTimeoutMs() : DEFAULT_UPSTREAM_TIMEOUT_MS,
-    params: req.query,
-    httpAgent: agent === httpAgent ? agent : undefined,
-    httpsAgent: agent === httpsAgent ? agent : undefined,
-  };
-}
-
-
-function isChatGenerationRequest(req) {
-  return req.path === '/messages' || req.path === '/chat/completions' || req.path === '/responses';
-}
-
-function initializeAttemptState(req, config) {
-  if (req.__attemptState) return req.__attemptState;
-
-  const applies = isChatGenerationRequest(req);
-  const enabled = applies && config.request_minimization_enabled !== false;
-  const parsedMaxAttempts = Number(config.chat_max_upstream_attempts);
-  const maxAttempts = Number.isFinite(parsedMaxAttempts) && parsedMaxAttempts >= 1
-    ? Math.floor(parsedMaxAttempts)
-    : 4;
-
-  req.__attemptState = {
-    applies,
-    enabled,
-    maxAttempts,
-    usedAttempts: 0,
-  };
-
-  return req.__attemptState;
-}
-
-function consumeAttempt(req) {
-  const state = req.__attemptState;
-  if (!state || !state.applies || !state.enabled) {
-    return { allowed: true, state };
-  }
-
-  if (state.usedAttempts >= state.maxAttempts) {
-    return { allowed: false, state };
-  }
-
-  state.usedAttempts += 1;
-  return { allowed: true, state };
-}
-
-function canRetry(req) {
-  const state = req.__attemptState;
-  if (!state || !state.applies || !state.enabled) return true;
-  return state.usedAttempts < state.maxAttempts;
-}
-
-function attemptLabel(req) {
-  const state = req.__attemptState;
-  if (!state || !state.applies || !state.enabled) return '';
-  return ` (attempt ${state.usedAttempts}/${state.maxAttempts})`;
-}
 
 function maskApiKey(apiKey) {
   const value = String(apiKey || '');
@@ -1438,8 +104,9 @@ function getProviderApiKeys(provider) {
 }
 
 function isRetryableApiKeyFailure(status, message, rawUpstreamMessage, upstreamErrorCode, err) {
-  if (!err?.response) return true;
-  if ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500) return true;
+  if (!err?.response) return false;
+  if ([401, 403, 408, 409, 425, 429].includes(status)) return true;
+  if (status >= 500) return false;
 
   const text = `${upstreamErrorCode || ''}\n${message || ''}\n${rawUpstreamMessage || ''}`;
   return /rate[-_\s]?limit|too many requests|quota|insufficient[-_\s]?(credit|credits|balance|funds)|credits?\s+exhausted|balance\s+exhausted|limit\s+exceeded|exceeded\s+quota|resource_exhausted/i.test(text);
@@ -1496,392 +163,12 @@ async function retryWithNextProviderApiKey(req, res, provider, apiKey, details) 
   return true;
 }
 
-function providerHasBaseUrlAndKey(provider) {
-  if (!provider || typeof provider !== 'object') return false;
-  const hasBaseUrl = typeof provider.baseUrl === 'string' && provider.baseUrl.trim().length > 0;
-  const hasApiKey = isFreeModelProvider(provider)
-    ? providerHasRealFreeModelApiKey(provider)
-    : Boolean(provider.apiKey) || (Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0);
-  return hasBaseUrl && hasApiKey;
-}
-
-function normalizeBaseUrlForMatch(value) {
-  return typeof value === 'string' ? value.replace(/\/+$/, '') : '';
-}
-
-function normalizeRouteTargets(routeValue) {
-  if (typeof routeValue === 'string') {
-    const target = routeValue.trim();
-    return target ? { legacyFixed: true, targets: [{ target, priority: 1 }] } : null;
-  }
-
-  if (!routeValue || typeof routeValue !== 'object' || Array.isArray(routeValue) || !Array.isArray(routeValue.providers)) {
-    return null;
-  }
-
-  const targets = routeValue.providers
-    .map((entry, index) => {
-      if (typeof entry === 'string') {
-        const target = entry.trim();
-        return target ? { target, priority: index + 1, index } : null;
-      }
-
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
-      const target = String(entry.target || entry.providerId || entry.baseUrl || '').trim();
-      if (!target) return null;
-      const parsedPriority = Number(entry.priority);
-      return {
-        target,
-        priority: Number.isFinite(parsedPriority) && parsedPriority > 0 ? parsedPriority : index + 1,
-        index,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.priority - b.priority || a.index - b.index)
-    .map(({ target }, index) => ({ target, priority: index + 1 }));
-
-  return targets.length > 0 ? { legacyFixed: false, targets } : null;
-}
-
-function buildModelRoute(model, key, routeValue, exact) {
-  const route = normalizeRouteTargets(routeValue);
-  if (!route) return null;
-  return { model: key || model, exact, ...route };
-}
-
-function findModelRoute(model, modelRouting) {
-  if (!model || !modelRouting || typeof modelRouting !== 'object' || Array.isArray(modelRouting)) return null;
-  const requestedModel = String(model);
-  const exactRoute = buildModelRoute(requestedModel, requestedModel, modelRouting[requestedModel], true);
-  if (exactRoute) return exactRoute;
-
-  // Fallback: Try matching without vendor prefix (e.g. "qwen/" in "qwen/qwen3.5-397b-a17b")
-  if (requestedModel.includes('/')) {
-    const requestedModelNoPrefix = requestedModel.split('/').slice(1).join('/');
-    const noPrefixRoute = buildModelRoute(requestedModel, requestedModelNoPrefix, modelRouting[requestedModelNoPrefix], true);
-    if (noPrefixRoute) return noPrefixRoute;
-  }
-
-  // Fallback 2: Try matching after normalizing both requested model and routing keys
-  const requestedNormalized = normalizeClaudeModelAlias(requestedModel);
-  for (const [key, routeValue] of Object.entries(modelRouting)) {
-    if (normalizeClaudeModelAlias(key) === requestedNormalized) {
-      const normalizedRoute = buildModelRoute(requestedModel, key, routeValue, true);
-      if (normalizedRoute) return normalizedRoute;
-    }
-  }
-
-  return Object.entries(modelRouting)
-    .map(([key, routeValue]) => {
-      if (!key || !requestedModel.startsWith(key)) return null;
-      return buildModelRoute(requestedModel, key, routeValue, false);
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.model.length - a.model.length)
-    [0] || null;
-}
-
-function resolveRoutedProvider(routeTarget, providers) {
-  const target = String(routeTarget || '').trim();
-  if (!target) return null;
-
-  return (Array.isArray(providers) ? providers : []).find((provider) => {
-    if (!provider) return false;
-    if (provider.id === target) return true;
-    const providerBaseUrl = normalizeBaseUrlForMatch(provider.baseUrl);
-    const targetBaseUrl = normalizeBaseUrlForMatch(target);
-    return providerBaseUrl && targetBaseUrl && providerBaseUrl === targetBaseUrl;
-  }) || null;
-}
-
-function resolveRoutedProviders(route, providers) {
-  if (!route?.targets) return [];
-  const seenProviderIds = new Set();
-
-  return route.targets
-    .map((entry) => {
-      const provider = resolveRoutedProvider(entry.target, providers);
-      return provider ? { ...entry, provider } : { ...entry, provider: null };
-    })
-    .filter((entry) => {
-      if (!entry.provider?.id) return true;
-      if (seenProviderIds.has(entry.provider.id)) return false;
-      seenProviderIds.add(entry.provider.id);
-      return true;
-    });
-}
-
-function getUsableRouteCandidates(route, providers) {
-  return resolveRoutedProviders(route, providers)
-    .filter((entry) => entry.provider && providerHasBaseUrlAndKey(entry.provider));
-}
-
-function getRouteTargetLabel(route) {
-  return (route?.targets || []).map((entry) => entry.target).join(' → ');
-}
-
-function getRouteCacheProviderId(route) {
-  if (!route || route.legacyFixed) return null;
-  const signature = (route.targets || []).map((entry) => entry.target).join('>');
-  return signature ? `route:${route.model}:${signature}` : null;
-}
-
-function getNextRouteProvider(req, failedProviderId) {
-  const route = req.__modelRoute;
-  if (!route || route.legacyFixed || !Array.isArray(route.candidates)) return null;
-
-  if (!req.__triedProviders) req.__triedProviders = new Set();
-  if (failedProviderId) req.__triedProviders.add(failedProviderId);
-
-  const nextCandidate = route.candidates.find((candidate) => {
-    const id = candidate.provider?.id;
-    return id && !req.__triedProviders.has(id);
-  });
-
-  return nextCandidate?.provider || null;
-}
-
-function shouldRouteFailover(status, err, isModelUnavailable) {
-  if (isModelUnavailable) return true;
-  if (!err?.response) return true;
-  if (status === 429) return true;
-  return [500, 502, 503, 504].includes(status);
-}
-
-function sendModelRouteConfigError(req, res, message, code = 'invalid_model_route') {
-  console.warn(`[proxy] ${message}`);
-
-  if (req.path.includes('/messages')) {
-    return res.status(503).json({
-      type: 'error',
-      error: {
-        type: 'api_error',
-        message,
-      },
-      usage: { input_tokens: 0, output_tokens: 0 },
-    });
-  }
-
-  return res.status(503).json({
-    error: {
-      message,
-      type: 'server_error',
-      code,
-    },
-  });
-}
-
-function providerCanPreserveModelForRateLimitFallback(provider, model) {
-  if (!providerHasBaseUrlAndKey(provider)) return false;
-  if (!model || typeof model !== 'string') return true;
-
-  // EcomAgent remaps Claude-family models in buildUpstreamRequest. A 429 fallback
-  // must preserve the exact requested model to avoid changing output quality.
-  if (provider.baseUrl && provider.baseUrl.toLowerCase().includes('ecom') && /claude/i.test(model)) {
-    return false;
-  }
-
-  if (isTimyProvider(provider) && normalizeTimyModel(model) !== model) {
-    return false;
-  }
-
-  return true;
-}
-
-function sendAttemptBudgetExhausted(req, res) {
-  const state = req.__attemptState;
-  const maxAttempts = state?.maxAttempts || 0;
-  const message = `Request attempt budget exhausted (${maxAttempts} max upstream attempts).`;
-  console.warn(`[proxy] ${message}`);
-
-  if (req.path.includes('/messages')) {
-    return res.status(429).json({
-      type: 'error',
-      error: {
-        type: 'rate_limit_error',
-        message,
-      },
-      usage: { input_tokens: 0, output_tokens: 0 },
-    });
-  }
-
-  return res.status(429).json({
-    error: {
-      message,
-      type: 'rate_limit_error',
-      code: 'attempt_budget_exhausted',
-    },
-  });
-}
-
-const TIMY_SUPPORTED_MODELS = [
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'claude-opus-4-7',
-];
-
-function isTimyProvider(providerOrBaseUrl) {
-  const baseUrl = typeof providerOrBaseUrl === 'string'
-    ? providerOrBaseUrl
-    : providerOrBaseUrl?.baseUrl;
-  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('timyai.com');
-}
-
-function normalizeTimyModel(model) {
-  if (!model || typeof model !== 'string') return model;
-  return model
-    .replace(/^claude-sonnet-4\.6$/i, 'claude-sonnet-4-6')
-    .replace(/^claude-opus-4\.6$/i, 'claude-opus-4-6')
-    .replace(/^claude-opus-4\.7$/i, 'claude-opus-4-7');
-}
-
-function getTimyUnsupportedModelMessage(model) {
-  return `Timy only supports these model ids: ${TIMY_SUPPORTED_MODELS.join(', ')}. Requested model: "${model || 'unknown'}".`;
-}
-
-function isFreeModelProvider(providerOrBaseUrl) {
-  const baseUrl = typeof providerOrBaseUrl === 'string'
-    ? providerOrBaseUrl
-    : providerOrBaseUrl?.baseUrl;
-  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('freemodel.dev');
-}
-
-function isFreeModelPlaceholderApiKey(apiKey) {
-  return String(apiKey || '').trim().toLowerCase() === 'freemodel';
-}
-
-function providerHasRealFreeModelApiKey(provider) {
-  if (!provider || typeof provider !== 'object') return false;
-  const keys = Array.isArray(provider.apiKeys) && provider.apiKeys.length > 0
-    ? provider.apiKeys
-    : [provider.apiKey];
-  return keys.some((key) => key && !isFreeModelPlaceholderApiKey(key));
-}
-
-function compactUpstreamErrorText(value, maxLength = 500) {
-  if (value === null || value === undefined) return '';
-  return String(value)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
-}
-
-function getRateLimitWaitMs(retryAfterRaw, defaultWaitMs = FREEMODEL_RATE_LIMIT_DEFAULT_WAIT_MS) {
-  if (retryAfterRaw) {
-    const retryAfter = String(retryAfterRaw).trim();
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.min(seconds * 1000, FREEMODEL_RATE_LIMIT_MAX_WAIT_MS);
-    }
-
-    const retryAt = Date.parse(retryAfter);
-    if (Number.isFinite(retryAt)) {
-      const waitMs = retryAt - Date.now();
-      if (waitMs > 0) return Math.min(waitMs, FREEMODEL_RATE_LIMIT_MAX_WAIT_MS);
-    }
-  }
-
-  return defaultWaitMs;
-}
-
-function sendFreeModelRateLimitError(req, res) {
-  const retries = req.__freeModelRateLimitRetries || 0;
-  const message = `FreeModel is rate limited. Retried ${retries} time(s); please wait and try again.`;
-
-  if (req.path.includes('/messages')) {
-    return res.status(429).json({
-      type: 'error',
-      error: {
-        type: 'rate_limit_error',
-        message,
-      },
-      usage: { input_tokens: 0, output_tokens: 0 },
-    });
-  }
-
-  return res.status(429).json({
-    error: {
-      message,
-      type: 'rate_limit_error',
-      code: 'freemodel_rate_limited',
-    },
-  });
-}
-
 function normalizeRemovedClaudeHaikuModel(model) {
   if (!model || typeof model !== 'string') return model;
   if (/^claude(?:\s+|-)haiku(?:\s+|-)4[.-]5(?:-[\w.-]+)?$/i.test(model)) {
     return 'claude-sonnet-4-6';
   }
   return model;
-}
-
-/**
- * parseKimiToolCallTokens — Parses moonshotai/kimi-style tool-call special tokens
- * embedded inside choice.delta.content into a standard tool_calls array.
- *
- * Kimi format (streamed as plain content text, not as tool_calls):
- *   <|tool_calls_section_begin|>
- *   <|tool_call_begin|>functions.Agent:0<|tool_call_argument_begin|>{...}<|tool_call_end|>
- *   <|tool_calls_section_end|>
- *
- * Returns { preSectionText, toolCalls } where toolCalls is an array compatible
- * with AnthropicSSETranslator.pushToolCallDelta().
- */
-function parseKimiToolCallTokens(text) {
-  const sectionStart = '<|tool_calls_section_begin|>';
-  const sectionEnd   = '<|tool_calls_section_end|>';
-  const callBegin    = '<|tool_call_begin|>';
-  const argBegin     = '<|tool_call_argument_begin|>';
-  const callEnd      = '<|tool_call_end|>';
-
-  const secStartIdx = text.indexOf(sectionStart);
-  const secEndIdx   = text.indexOf(sectionEnd);
-  if (secStartIdx === -1 || secEndIdx === -1) return null;
-
-  const preSectionText  = text.slice(0, secStartIdx);
-  const postSectionText = text.slice(secEndIdx + sectionEnd.length);
-  const sectionBody     = text.slice(secStartIdx + sectionStart.length, secEndIdx);
-
-  const toolCalls = [];
-  let searchPos = 0;
-  let callIndex = 0;
-
-  while (true) {
-    const cbIdx = sectionBody.indexOf(callBegin, searchPos);
-    if (cbIdx === -1) break;
-
-    const afterCallBegin = cbIdx + callBegin.length;
-    const argIdx = sectionBody.indexOf(argBegin, afterCallBegin);
-    if (argIdx === -1) break;
-
-    const ceIdx = sectionBody.indexOf(callEnd, argIdx + argBegin.length);
-    if (ceIdx === -1) break;
-
-    const funcRef   = sectionBody.slice(afterCallBegin, argIdx).trim();
-    const argsRaw   = sectionBody.slice(argIdx + argBegin.length, ceIdx).trim();
-
-    // funcRef format: "functions.FunctionName:index" or just "FunctionName"
-    // Strip the namespace prefix and the trailing :index
-    const funcName = funcRef
-      .replace(/^[^.]+\./, '')  // remove "functions." prefix
-      .replace(/:\d+$/, '');    // remove ":0", ":1" suffix
-
-    toolCalls.push({
-      index: callIndex,
-      id: `toolu_kimi_${callIndex}_${Math.random().toString(36).slice(2, 8)}`,
-      type: 'function',
-      function: {
-        name: funcName || 'unknown_tool',
-        arguments: argsRaw,
-      },
-    });
-
-    callIndex++;
-    searchPos = ceIdx + callEnd.length;
-  }
-
-  return { preSectionText, postSectionText, toolCalls };
 }
 
 /**
@@ -1972,11 +259,7 @@ async function proxyRequest(req, res) {
         const message = `Model "${modelId}" is not added to model routes. Please add it in Settings → Model Routing before using it.`;
         console.warn(`[proxy] Model-route gate blocked: ${message}`);
         if (req.path.includes('/messages')) {
-          return res.status(400).json({
-            type: 'error',
-            error: { type: 'invalid_request_error', message },
-            usage: { input_tokens: 0, output_tokens: 0 }
-          });
+          return sendAnthropicProxyError(req, res, 400, 'invalid_request_error', message);
         }
         return res.status(400).json({
           error: { message, type: 'invalid_request_error', code: 'model_not_in_routes' },
@@ -2139,6 +422,7 @@ async function proxyRequest(req, res) {
         promptTokens: cachedUsage.promptTokens,
         completionTokens: cachedUsage.completionTokens,
         totalTokens: cachedUsage.totalTokens,
+        tokenUsageEstimated: cached?.usage?.estimated === true,
         streaming: false,
         provider: 'cache',
         optimization: optimizationMeta,
@@ -2151,14 +435,7 @@ async function proxyRequest(req, res) {
   }
   if (req.method === 'GET' && req.path === '/models') {
     const modelCatalogs = Array.isArray(config.model_catalogs) ? config.model_catalogs : [];
-    const activeProviderForModels = configuredProviders.find((p) => p.id === config.active_provider_id) || null;
-    const activeProviderIsNvidiaNim = isNvidiaNimProvider(activeProviderForModels);
-    const activeCatalog = activeProviderForModels
-      ? modelCatalogs.find((cat) => cat.providerId === activeProviderForModels.id)
-      : null;
-    const modelList = activeProviderIsNvidiaNim
-      ? (activeCatalog?.models || [])
-      : modelCatalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
+    const modelList = modelCatalogs.reduce((acc, cat) => acc.concat(cat.models || []), []);
     const now = Math.floor(Date.now() / 1000);
     const seenModelIds = new Set();
     const data = modelList
@@ -2238,8 +515,6 @@ async function proxyRequest(req, res) {
     }
   }
 
-  const configuredActiveProvider = eligibleProviders.find((p) => p.id === config.active_provider_id) || null;
-  const configuredActiveProviderIsNvidiaNim = isNvidiaNimProvider(configuredActiveProvider);
   let providerToUseId = fixedRouteProvider?.id || config.active_provider_id;
 
   // req.__currentProviderId carries provider IDs set during auto-switch or
@@ -2251,7 +526,7 @@ async function proxyRequest(req, res) {
     providerToUseId = req.__sameProviderRetryProviderId;
   } else if (req.__currentProviderId && !strictProviderRouting) {
     providerToUseId = req.__currentProviderId;
-  } else if (clientRequestedProviderId && !configuredActiveProviderIsNvidiaNim && !strictProviderRouting) {
+  } else if (clientRequestedProviderId && !strictProviderRouting) {
     // Try to match by provider ID first, then by baseUrl suffix.
     const matchById = eligibleProviders.find(
       (p) => p.id === clientRequestedProviderId
@@ -2293,31 +568,21 @@ async function proxyRequest(req, res) {
   // from all configuredProviders). For other requests, look up in eligibleProviders as usual.
   const providerById = fixedRouteProvider || eligibleProviders.find((p) => p.id === providerToUseId) || null;
   const firstUsableProvider = eligibleProviders.find(hasUsableProvider) || null;
-  
-  const isNvidiaNimActive = isNvidiaNimProvider(providerById);
 
   const activeProvider = strictProviderRouting
     ? providerById
     : (providerById && hasUsableProvider(providerById)
       ? providerById
-      : (isNvidiaNimActive ? providerById : (firstUsableProvider || providerById || eligibleProviders[0] || null)));
-  const requestStartedOnNvidiaNim = isNvidiaNimProvider(activeProvider);
-  req.__startedOnNvidiaNim = requestStartedOnNvidiaNim;
-  if (requestStartedOnNvidiaNim) warmupNvidiaNimConnection();
+      : (firstUsableProvider || providerById || eligibleProviders[0] || null));
     
   let upstreamProvider = activeProvider;
   let providerName = activeProvider ? activeProvider.name : 'unknown';
+  req.__upstreamProviderId = activeProvider?.id || '';
+  req.__upstreamProviderName = providerName;
 
   if (!activeProvider) {
     if (req.path.includes('/messages')) {
-      return res.status(503).json({
-        type: 'error',
-        error: {
-          type: 'api_error',
-          message: 'No provider configured. Please add a provider in Settings.'
-        },
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
+      return sendAnthropicProxyError(req, res, 503, 'api_error', 'No provider configured. Please add a provider in Settings.');
     }
     return res.status(503).json({
       error: {
@@ -2350,14 +615,13 @@ async function proxyRequest(req, res) {
   if (!apiKey && !isFreeModelProvider(activeProvider)) {
     console.error(`[proxy] ❌ No API key found for provider "${activeProvider.name}" (ID: ${activeProvider.id})`);
     if (req.path.includes('/messages')) {
-      return res.status(503).json({
-        type: 'error',
-        error: {
-          type: 'api_error',
-          message: `No API key configured for provider "${activeProvider.name}". Please add one in the Dashboard Settings.`
-        },
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
+      return sendAnthropicProxyError(
+        req,
+        res,
+        503,
+        'api_error',
+        `No API key configured for provider "${activeProvider.name}". Please add one in the Dashboard Settings.`
+      );
     }
     return res.status(503).json({
       error: {
@@ -2381,51 +645,13 @@ async function proxyRequest(req, res) {
 
   const originalModel = targetModel;
   const isCopilotProvider = /\/copilot\/v1\/?$/i.test(baseUrl) || baseUrl.includes('/copilot/v1');
-  const isNvidiaNimUpstream = requestStartedOnNvidiaNim ||
-    isNvidiaNimProvider(upstreamProvider) ||
-    isNvidiaNimValue(providerName) ||
-    isNvidiaNimValue(baseUrl);
-  req.__upstreamProviderIsNvidiaNim = isNvidiaNimUpstream;
-
-  if (isNvidiaNimUpstream && (!targetModel || targetModel === 'unknown' || /^claude[-.]/i.test(targetModel))) {
-    let examples = [];
-    try {
-      const activeCatalog = (config.model_catalogs || []).find(
-        (catalog) => catalog.providerId === upstreamProvider?.id || catalog.providerId === activeProvider?.id
-      );
-      examples = (activeCatalog?.models || [])
-        .map((model) => model?.id)
-        .filter(Boolean)
-        .slice(0, 3);
-    } catch {
-      examples = [];
-    }
-
-    const exampleText = examples.length
-      ? ` Try one of these synced NIM model ids: ${examples.join(', ')}.`
-      : ' Sync NVIDIA NIM models in the dashboard, then set your client to one of those model ids.';
-    const message = `NVIDIA NIM is active, but the client requested "${targetModel}". Set the client model to an NVIDIA NIM model id; the proxy will not substitute a default model.${exampleText}`;
-    console.warn(`[proxy] ${message}`);
-
-    if (req.path.includes('/messages')) {
-      return res.status(400).json({
-        type: 'error',
-        error: {
-          type: 'invalid_request_error',
-          message,
-        },
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
-    }
-
-    return res.status(400).json({
-      error: {
-        message,
-        type: 'invalid_request_error',
-        code: 'invalid_nvidia_nim_model',
-      },
-    });
-  }
+  const isCpassRequest = isCpassProvider(activeProvider) ||
+    isCpassProvider(upstreamProvider) ||
+    isCpassProvider(baseUrl);
+  const isAnthropicCompatibleUpstream = isAnthropicCompatibleProvider(activeProvider) ||
+    isAnthropicCompatibleProvider(upstreamProvider) ||
+    isAnthropicCompatibleProvider(baseUrl);
+  req.__upstreamProviderIsAnthropicCompatible = isAnthropicCompatibleUpstream;
 
   const skipModelMappingForRateLimitFallback = req.__skipModelMappingForRateLimitFallback === true;
 
@@ -2447,14 +673,7 @@ async function proxyRequest(req, res) {
       console.warn(`[proxy] ${message}`);
 
       if (req.path.includes('/messages')) {
-        return res.status(400).json({
-          type: 'error',
-          error: {
-            type: 'invalid_request_error',
-            message,
-          },
-          usage: { input_tokens: 0, output_tokens: 0 },
-        });
+        return sendAnthropicProxyError(req, res, 400, 'invalid_request_error', message);
       }
 
       return res.status(400).json({
@@ -2522,32 +741,41 @@ async function proxyRequest(req, res) {
     return res.json(stubData);
   }
 
-  // ── NVIDIA NIM: proactive client-side rate limiting ───────────────────────
-  // Enforce RPM limit before the upstream request to avoid hitting the
-  // NVIDIA NIM quota wall and receiving a 429. The acquire() call waits
-  // transparently when the per-minute bucket is full.
-  if (isNvidiaNimUpstream && targetModel && targetModel !== 'unknown') {
-    await nvidiaNimLimiter.acquire(targetModel);
-    const { rpmUsed, rpmLimit } = nvidiaNimLimiter.stats(targetModel);
-    console.log(`[nvidia-nim-limiter] Slot acquired for "${targetModel}" — RPM: ${rpmUsed}/${rpmLimit}`);
+  // Copilot is an in-process bridge, not a remote upstream. Calling the
+  // mounted /copilot route over HTTP adds a self-proxy hop that can hang behind
+  // the active /v1 request, so dispatch straight to the bridge handlers.
+  if (isCopilotProvider) {
+    const {
+      handleChatCompletions,
+      handleMessages,
+      handleModels,
+    } = require('./copilot-proxy');
+
+    if (req.path.includes('/messages')) {
+      return handleMessages(req, res);
+    }
+
+    if (req.path.includes('/chat/completions')) {
+      return handleChatCompletions(req, res);
+    }
+
+    if (req.path.includes('/models')) {
+      return handleModels(req, res);
+    }
   }
 
   try {
     const buildStart = Date.now();
     const axiosConfig = buildUpstreamRequest(req, baseUrl, apiKey);
+    const requestPayloadForUsage = axiosConfig.data && typeof axiosConfig.data === 'object'
+      ? axiosConfig.data
+      : req.body;
+    const isBlazeApiUpstream = isBlazeApiProvider(baseUrl);
     timing.requestBuildMs = Date.now() - buildStart;
 
     const upstreamStart = Date.now();
     const upstreamRes = await axios(axiosConfig);
     timing.upstreamHeadersMs = Date.now() - upstreamStart;
-    if (isNvidiaNimUpstream) {
-      warnSlowNvidiaNimRequest({
-        phase: 'headers',
-        elapsedMs: timing.upstreamHeadersMs,
-        model: targetModel,
-        providerName,
-      });
-    }
 
     // console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
 
@@ -2572,7 +800,8 @@ async function proxyRequest(req, res) {
     // ── Detect request type ───────────────────────────────────────────────
     const isChatCompletions = req.path.includes('/chat/completions');
     const isMessages = req.path.includes('/messages');
-    const isNativeNvidiaNimMessages = req.__nativeNvidiaNimMessages === true;
+    const isNativeAnthropicMessages = isMessages && req.__upstreamProviderIsAnthropicCompatible === true;
+    const shouldEstimateTokenUsage = isBlazeApiUpstream || isNativeAnthropicMessages;
 
     // Buffer if:
     // 1. Not streaming
@@ -2591,43 +820,99 @@ async function proxyRequest(req, res) {
     // ── Body Handling ────────────────────────────────────────────────────
     let rawBody = '';
     let sseBuffer = ''; // for normalizing incomplete SSE lines in streaming mode
+    let nativeAnthropicSseBuffer = ''; // pass-through Anthropic SSE still needs usage capture
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
+    let tokenUsageEstimated = false;
+    let completionTextForUsage = '';
     let capturedUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, hasUsage: false };
     const captureUsage = (json) => {
       capturedUsage = mergeTokenUsage(capturedUsage, normalizeTokenUsage(json));
       promptTokens = capturedUsage.promptTokens;
       completionTokens = capturedUsage.completionTokens;
       totalTokens = capturedUsage.totalTokens;
+      if (capturedUsage.hasUsage) tokenUsageEstimated = false;
+    };
+    const captureCompletionText = (text) => {
+      if (!shouldEstimateTokenUsage || typeof text !== 'string' || text.length === 0) return;
+      completionTextForUsage += text;
+    };
+    const pushTranslatedDelta = (text, thinking = '') => {
+      captureCompletionText(text);
+      if (thinking) captureCompletionText(thinking);
+      anthropicTranslator.pushDelta(text, thinking);
+    };
+    const applyEstimatedUsage = () => {
+      const hasMeaningfulExactUsage = capturedUsage.hasUsage &&
+        (capturedUsage.totalTokens > 0 || capturedUsage.promptTokens > 0 || capturedUsage.completionTokens > 0);
+      if (!shouldEstimateTokenUsage || hasMeaningfulExactUsage) return;
+      const estimatedPromptTokens = estimatePromptTokens({
+        system: requestPayloadForUsage?.system,
+        messages: requestPayloadForUsage?.messages,
+      });
+      const estimatedCompletionTokens = estimateTextTokens(completionTextForUsage);
+      capturedUsage = {
+        promptTokens: estimatedPromptTokens,
+        completionTokens: estimatedCompletionTokens,
+        totalTokens: estimatedPromptTokens + estimatedCompletionTokens,
+        hasUsage: true,
+        hasExplicitTotal: false,
+        estimated: true,
+      };
+      promptTokens = capturedUsage.promptTokens;
+      completionTokens = capturedUsage.completionTokens;
+      totalTokens = capturedUsage.totalTokens;
+      tokenUsageEstimated = true;
+    };
+    const captureUsageFromSseText = (text) => {
+      if (typeof text !== 'string' || text.length === 0) return;
+      nativeAnthropicSseBuffer += text;
+      const lines = nativeAnthropicSseBuffer.split('\n');
+      nativeAnthropicSseBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmedLine = line.trimEnd();
+        if (!/^data:/i.test(trimmedLine)) continue;
+
+        const payload = trimmedLine.slice(trimmedLine.indexOf(':') + 1).trim();
+        if (!payload || payload === '[DONE]') continue;
+
+        try {
+          const obj = JSON.parse(payload);
+          if (obj.type === 'message_delta' && obj.usage) {
+            console.log('[proxy] Cpass message_delta usage:', JSON.stringify(obj.usage));
+          }
+          captureUsage(obj);
+          captureCompletionText(
+            obj?.delta?.text ||
+            obj?.delta?.text_delta?.text ||
+            obj?.delta?.thinking ||
+            obj?.delta?.thinking_delta?.thinking ||
+            extractCompletionTextForUsage(obj)
+          );
+        } catch {
+          // Usage capture is best-effort; never disturb the streamed response.
+        }
+      }
     };
     let anthropicTranslator = null;
-    if (isMessages && isStreaming && !isNativeNvidiaNimMessages) {
+    if (isMessages && isStreaming && !isNativeAnthropicMessages) {
       anthropicTranslator = new AnthropicSSETranslator(res, requestedModel);
       anthropicTranslator.start();
     }
-    // Buffer for NVIDIA NIM / Kimi models that embed tool calls as special tokens
-    // inside choice.delta.content instead of using the standard tool_calls array.
-    // Only activated when the upstream is NVIDIA NIM — zero effect on other providers.
-    let kimiTextBuffer = '';
+    let blazeToolTextBuffer = '';
 
     upstreamRes.data.on('data', (chunk) => {
       if (timing.firstChunkMs === null) {
         timing.firstChunkMs = Date.now() - startTime;
-        if (isNvidiaNimUpstream) {
-          warnSlowNvidiaNimRequest({
-            phase: 'first chunk',
-            elapsedMs: timing.firstChunkMs,
-            model: targetModel,
-            providerName,
-          });
-        }
       }
       const text = chunk.toString();
       if (shouldBuffer) rawBody += text;
 
       if (!shouldBuffer) {
-        if (isStreaming && isNativeNvidiaNimMessages) {
+        if (isStreaming && isNativeAnthropicMessages) {
+          captureUsageFromSseText(text);
           res.write(chunk);
           return;
         }
@@ -2638,8 +923,9 @@ async function proxyRequest(req, res) {
           sseBuffer = lines.pop(); // keep last incomplete line in buffer
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const payload = line.slice(6).trim();
+            const trimmedLine = line.trimEnd();
+            if (/^data:/i.test(trimmedLine)) {
+              const payload = trimmedLine.slice(trimmedLine.indexOf(':') + 1).trim();
               if (payload === '[DONE]') {
                 if (!anthropicTranslator) res.write('data: [DONE]\n\n');
                 // anthropicTranslator finishes on 'end' event below
@@ -2658,7 +944,7 @@ async function proxyRequest(req, res) {
                       continue;
                     }
                     if (obj.type === 'content_block_delta') {
-                      anthropicTranslator.pushDelta(
+                      pushTranslatedDelta(
                         obj.delta?.text || obj.delta?.text_delta?.text || '', 
                         obj.delta?.thinking || obj.delta?.thinking_delta?.thinking || ''
                       );
@@ -2673,56 +959,34 @@ async function proxyRequest(req, res) {
                   const deltaText = choice?.delta?.content || choice?.text || '';
                   const thinking = choice?.delta?.reasoning_content || '';
                   const toolCalls = choice?.delta?.tool_calls || [];
+                  const shouldParseBlazeToolText = isBlazeApiProvider(baseUrl);
 
-                  // NVIDIA NIM / Kimi: intercept tool-call special tokens that arrive
-                  // as plain content text instead of in the tool_calls delta array.
-                  // Also strip Kimi-internal special tokens (e.g. <|Memory|>, <|im_start|>)
-                  // that leak into delta.content — these are model-internal context markers
-                  // and must never be rendered as user-visible text.
-                  if (isNvidiaNimUpstream && deltaText) {
-                    // Strip any <|...|> special tokens that are NOT tool-call section markers.
-                    // Tool-call markers are preserved so parseKimiToolCallTokens() can handle them.
-                    const KIMI_TOOL_MARKERS = [
-                      '<|tool_calls_section_begin|>',
-                      '<|tool_calls_section_end|>',
-                      '<|tool_call_begin|>',
-                      '<|tool_call_argument_begin|>',
-                      '<|tool_call_end|>',
-                    ];
-                    const cleanedDeltaText = deltaText.replace(/<\|[^|]+\|>/g, (token) =>
-                      KIMI_TOOL_MARKERS.includes(token) ? token : ''
-                    );
-                    kimiTextBuffer += cleanedDeltaText;
+                  if (shouldParseBlazeToolText && deltaText) {
+                    const nextToolBuffer = blazeToolTextBuffer + deltaText;
+                    const trimmed = nextToolBuffer.trimStart();
+                    const looksLikeJsonText = trimmed.startsWith('{') || trimmed.startsWith('[');
+                    const looksLikeToolJson =
+                      /^{\s*"tool_calls"/.test(trimmed) ||
+                      /^\[\s*{\s*"(function|id)"/.test(trimmed);
 
-                    if (kimiTextBuffer.includes('<|tool_calls_section_begin|>')) {
-                      // Hold text until the closing marker arrives
-                      if (kimiTextBuffer.includes('<|tool_calls_section_end|>')) {
-                        const parsed = parseKimiToolCallTokens(kimiTextBuffer);
-                        if (parsed && parsed.toolCalls.length > 0) {
-                          if (parsed.preSectionText) {
-                            anthropicTranslator.pushDelta(parsed.preSectionText, thinking);
-                          }
-                          for (const tc of parsed.toolCalls) {
-                            anthropicTranslator.pushToolCallDelta(tc);
-                          }
-                          if (parsed.postSectionText) {
-                            anthropicTranslator.pushDelta(parsed.postSectionText, '');
-                          }
-                        } else {
-                          // Parse failed — emit the buffer as raw text so nothing is lost
-                          anthropicTranslator.pushDelta(kimiTextBuffer, thinking);
+                    if (blazeToolTextBuffer || looksLikeJsonText) {
+                      blazeToolTextBuffer = nextToolBuffer;
+                      const parsed = tryParseToolCallsFromJsonText(blazeToolTextBuffer);
+                      if (parsed.complete && parsed.toolCalls.length > 0) {
+                        for (const tc of parsed.toolCalls) {
+                          anthropicTranslator.pushToolCallDelta(tc);
                         }
-                        kimiTextBuffer = '';
+                        blazeToolTextBuffer = '';
+                      } else if ((parsed.complete && parsed.toolCalls.length === 0 && !looksLikeToolJson) || blazeToolTextBuffer.length > 65536) {
+                        pushTranslatedDelta(blazeToolTextBuffer, thinking);
+                        blazeToolTextBuffer = '';
                       }
-                      // else: still waiting for section_end — don't emit yet
-                    } else {
-                      // No Kimi tool tokens — safe to emit immediately
-                      anthropicTranslator.pushDelta(kimiTextBuffer, thinking);
-                      kimiTextBuffer = '';
+                    } else if (deltaText || thinking) {
+                      pushTranslatedDelta(deltaText, thinking);
                     }
                   } else {
                     if (deltaText || thinking) {
-                      anthropicTranslator.pushDelta(deltaText, thinking);
+                      pushTranslatedDelta(deltaText, thinking);
                     }
                   }
 
@@ -2743,13 +1007,14 @@ async function proxyRequest(req, res) {
                 return { ...rest, finish_reason: rest.finish_reason ?? null };
               });
             }
+            captureCompletionText(extractCompletionTextForUsage(obj));
             res.write(`data: ${JSON.stringify(obj)}\n\n`);
               } catch {
                 if (!anthropicTranslator) res.write(`${line}\n`);
               }
-        } else if (line.trim() !== '') {
+        } else if (trimmedLine.trim() !== '') {
           // Pass through 'event:', 'id:', 'retry:' etc
-          res.write(`${line}\n`);
+          res.write(`${trimmedLine}\n`);
             }
           }
         } else {
@@ -2763,11 +1028,32 @@ async function proxyRequest(req, res) {
         ? null
         : Date.now() - startTime - timing.firstChunkMs;
 
-      // Flush any Kimi content that was held waiting for a tool section that
-      // never completed (e.g. model stopped mid-generation).
-      if (anthropicTranslator && kimiTextBuffer) {
-        anthropicTranslator.pushDelta(kimiTextBuffer, '');
-        kimiTextBuffer = '';
+      if (anthropicTranslator && blazeToolTextBuffer) {
+        const parsed = tryParseToolCallsFromJsonText(blazeToolTextBuffer);
+        if (parsed.toolCalls.length > 0) {
+          for (const tc of parsed.toolCalls) {
+            anthropicTranslator.pushToolCallDelta(tc);
+          }
+        } else {
+          pushTranslatedDelta(blazeToolTextBuffer, '');
+        }
+        blazeToolTextBuffer = '';
+      }
+
+      if (isStreaming && isNativeAnthropicMessages && nativeAnthropicSseBuffer.trim()) {
+        captureUsageFromSseText('\n');
+      }
+
+      applyEstimatedUsage();
+
+      if (isCpassRequest && isStreaming) {
+        console.log('[proxy] Cpass streaming final usage:', {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          hasUsage: capturedUsage.hasUsage,
+          tokenUsageEstimated
+        });
       }
 
       if (anthropicTranslator) {
@@ -2854,9 +1140,27 @@ async function proxyRequest(req, res) {
         if (!isStreaming) {
           const json = bufferedBody || JSON.parse(rawBody);
           captureUsage(json);
+          if (
+            !capturedUsage.hasUsage ||
+            (capturedUsage.totalTokens === 0 && capturedUsage.promptTokens === 0 && capturedUsage.completionTokens === 0)
+          ) {
+            captureCompletionText(extractCompletionTextForUsage(json));
+          }
         }
       } catch {
         // Usage parse is best-effort
+      }
+
+      applyEstimatedUsage();
+
+      if (tokenUsageEstimated && bufferedBody && typeof bufferedBody === 'object') {
+        bufferedBody.usage = {
+          ...(bufferedBody.usage || {}),
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
+          estimated: true,
+        };
       }
 
       if (cacheEligible && !optimizationMeta.cacheHit && cacheKey && shouldBuffer && upstreamRes.status < 400 && bufferedBody) {
@@ -2873,6 +1177,7 @@ async function proxyRequest(req, res) {
         promptTokens,
         completionTokens,
         totalTokens,
+        tokenUsageEstimated,
         streaming: isStreaming,
         provider: providerName,
         performance: timing,
@@ -2935,14 +1240,7 @@ async function proxyRequest(req, res) {
 
   } catch (err) {
     const status = err.response?.status || 502;
-    // Capture retry-after header early — needed for NVIDIA NIM 429 backoff below.
     const retryAfterRaw = err.response?.headers?.['retry-after'] || err.response?.headers?.['x-ratelimit-reset-requests'] || '';
-    const retryAfterSeconds = (() => {
-      const val = parseInt(retryAfterRaw, 10);
-      if (Number.isFinite(val) && val > 0) return Math.min(val, 65);
-      // retry-after can also be an HTTP-date; treat it as unknown → use default
-      return null;
-    })();
 
     // When responseType:'stream', err.response.data is a Readable stream — NOT a
     // plain object. Calling JSON.stringify on it causes "circular structure" errors.
@@ -2979,6 +1277,8 @@ async function proxyRequest(req, res) {
         message = typeof parsed.detail === 'string' && parsed.detail.trim()
           ? `${parsed.title}: ${parsed.detail}`
           : parsed.title;
+      } else if (isBlazeApiProvider(baseUrl) && (parsed.choices || parsed.object)) {
+        message = `Blaze upstream returned ${status} for model "${targetModel}". The model may not be supported or may be offline.`;
       }
     } catch (e) {
       // Keep original message if it's not JSON
@@ -2994,22 +1294,6 @@ async function proxyRequest(req, res) {
       console.warn(`[proxy] FreeModel upstream status ${status}: ${compactUpstreamErrorText(message || rawUpstreamMessage)}`);
     } else {
       console.error(`[proxy] Upstream request failed (${status}): ${String(message).slice(0, 1200)}`);
-    }
-
-    const isNvidiaNimDictHashError =
-      isNvidiaNimUpstream &&
-      status >= 500 &&
-      /unhashable type:\s*['"]dict['"]/i.test(`${message}\n${rawUpstreamMessage}`);
-
-    if (isNvidiaNimDictHashError && !req.__nvidiaNimUnhashableRetried) {
-      if (!canRetry(req)) {
-        console.warn(`[proxy] NVIDIA NIM dict-hash retry skipped: attempt budget exhausted${attemptLabel(req)}`);
-      } else {
-        req.__nvidiaNimUnhashableRetried = true;
-        req.__nvidiaNimStripTools = true;
-        console.warn(`[proxy] NVIDIA NIM rejected a tool-preserving request with a dict-hash error; retrying once without tools${attemptLabel(req)}`);
-        return proxyRequest(req, res);
-      }
     }
 
     // Detect Gemini function-call/response parity error — retry with stripped tool history
@@ -3078,6 +1362,13 @@ async function proxyRequest(req, res) {
       err,
     });
     if (keyFailoverResult) return keyFailoverResult;
+    const isRetryableProviderFailure = isRetryableApiKeyFailure(
+      status,
+      message,
+      rawUpstreamMessage,
+      upstreamErrorCode,
+      err
+    );
 
     // 0. Rate Limit Failover: Provider-specific handling after same-provider keys are exhausted.
     if (status === 429) {
@@ -3114,12 +1405,6 @@ async function proxyRequest(req, res) {
         return sendFreeModelRateLimitError(req, res);
       }
 
-      const currentProviderIsNvidiaNim = req.__upstreamProviderIsNvidiaNim === true ||
-        req.__startedOnNvidiaNim === true ||
-        isNvidiaNimProvider(currentProvider) ||
-        isNvidiaNimValue(providerName) ||
-        isNvidiaNimValue(baseUrl);
-
       if (req.__fixedModelRouteProviderId) {
         console.warn(
           `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; fixed model route "${req.__fixedModelRouteKey}" is enabled, so provider fallback is skipped.`
@@ -3139,7 +1424,7 @@ async function proxyRequest(req, res) {
             `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; ` +
             `retrying route "${req.__modelRoute.key}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
           );
-          req.__currentProviderId = nextProvider.id;
+          switchToFallbackProvider(req, nextProvider.id);
           req.__sameProviderKeyFailoverExhausted = false;
           req.__skipModelMappingForRateLimitFallback = true;
           if (req.body && currentModelForFallback) req.body.model = currentModelForFallback;
@@ -3153,27 +1438,6 @@ async function proxyRequest(req, res) {
         console.warn(
           `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; strict selected-provider routing is enabled, so provider fallback is skipped.`
         );
-      } else if (currentProviderIsNvidiaNim) {
-        // NVIDIA NIM 429: wait for retry-after (or a short default) and retry transparently.
-        // The client never sees the error — it just experiences a brief pause.
-        if (!req.__nvidiaNimRateLimitRetried) {
-          if (!canRetry(req)) {
-            console.warn(`[proxy] NVIDIA NIM rate-limit retry skipped: attempt budget exhausted${attemptLabel(req)}`);
-          } else {
-            req.__nvidiaNimRateLimitRetried = true;
-            const waitMs = (retryAfterSeconds !== null ? retryAfterSeconds : 5) * 1000;
-            console.warn(
-              `[proxy] Rate limit (429) on NVIDIA NIM for model "${req.body?.model || targetModel}"; ` +
-              `waiting ${waitMs / 1000}s then retrying${retryAfterSeconds === null ? ' (no retry-after header, using 5s default)' : ''}${attemptLabel(req)}`
-            );
-            await new Promise(resolve => setTimeout(resolve, waitMs));
-            return proxyRequest(req, res);
-          }
-        } else {
-          console.warn(
-            `[proxy] Rate limit (429) on NVIDIA NIM; already retried once, giving up for model "${req.body?.model || targetModel}".`
-          );
-        }
       } else if (req.__sameProviderKeyFailoverExhausted) {
         console.warn(
           `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; same-provider API keys are exhausted, so provider fallback is skipped.`
@@ -3200,7 +1464,7 @@ async function proxyRequest(req, res) {
               `[proxy] Rate limit (429) on ${currentProvider?.name || providerName}; ` +
               `retrying same model "${currentModelForFallback}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
             );
-            req.__currentProviderId = nextProvider.id;
+            switchToFallbackProvider(req, nextProvider.id);
             req.__skipModelMappingForRateLimitFallback = true;
             if (req.body && currentModelForFallback) req.body.model = currentModelForFallback;
             return proxyRequest(req, res);
@@ -3213,7 +1477,7 @@ async function proxyRequest(req, res) {
       }
     }
 
-    if (req.__modelRoute && !req.__modelRoute.legacyFixed && shouldRouteFailover(status, err, isModelUnavailable)) {
+    if (req.__modelRoute && !req.__modelRoute.legacyFixed && shouldRouteFailover(status, err, isModelUnavailable, isRetryableProviderFailure)) {
       if (!req.__triedProviders) req.__triedProviders = new Set();
       const failedProvider = upstreamProvider || activeProvider || currentProvider;
       if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
@@ -3229,7 +1493,7 @@ async function proxyRequest(req, res) {
           `[proxy] Provider error (${status}) on ${failedProvider?.name || providerName}; ` +
           `retrying route "${req.__modelRoute.key}" with provider ${nextProvider.name || nextProvider.id}${attemptLabel(req)}`
         );
-        req.__currentProviderId = nextProvider.id;
+        switchToFallbackProvider(req, nextProvider.id);
         req.__sameProviderKeyFailoverExhausted = false;
         return proxyRequest(req, res);
       }
@@ -3247,13 +1511,7 @@ async function proxyRequest(req, res) {
       const failedProvider = upstreamProvider || activeProvider;
       if (failedProvider?.id) req.__triedProviders.add(failedProvider.id);
 
-      const isNvidiaNim = req.__startedOnNvidiaNim === true ||
-        isNvidiaNimProvider(activeProvider) ||
-        isNvidiaNimProvider(upstreamProvider) ||
-        isNvidiaNimValue(providerName) ||
-        isNvidiaNimValue(baseUrl);
-
-      const nextProvider = (req.__fixedModelRouteProviderId || strictProviderRouting || isNvidiaNim || req.__sameProviderKeyFailoverExhausted)
+      const nextProvider = (req.__fixedModelRouteProviderId || strictProviderRouting || req.__sameProviderKeyFailoverExhausted)
         ? null
         : eligibleProviders.find((p) => {
             const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
@@ -3267,7 +1525,7 @@ async function proxyRequest(req, res) {
           console.warn(`[proxy] Provider auto-switch retry skipped: attempt budget exhausted${attemptLabel(req)}`);
         } else {
           console.warn(`[proxy] Model ${blockedModel} unavailable on ${failedProvider?.name || activeProvider.name}; auto-switching to ${nextProvider.name}${attemptLabel(req)}`);
-          req.__currentProviderId = nextProvider.id;
+          switchToFallbackProvider(req, nextProvider.id);
           // Keep the original requested model for the next provider
           return proxyRequest(req, res);
         }
@@ -3304,14 +1562,7 @@ async function proxyRequest(req, res) {
         : message;
 
       if (req.path.includes('/messages')) {
-        res.status(status).json({
-          type: "error",
-          error: {
-            type: "api_error",
-            message: descriptiveMessage
-          },
-          usage: { input_tokens: 0, output_tokens: 0 }
-        });
+        sendAnthropicProxyError(req, res, status, 'api_error', descriptiveMessage);
       } else {
         res.status(status).json({
           error: {
@@ -3334,4 +1585,4 @@ async function proxyRequest(req, res) {
   }
 }
 
-module.exports = { proxyRequest, warmupNvidiaNimConnection };
+module.exports = { proxyRequest };

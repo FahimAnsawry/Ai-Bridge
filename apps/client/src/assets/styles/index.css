@@ -2,15 +2,15 @@
 @import 'tailwindcss';
 
 @theme {
-  /* ── Dark Neon Palette ── */
-  --color-bg-page: #080c14;
-  --color-bg-page-strong: #05070a;
-  --color-bg-panel: #0f172a;
-  --color-bg-elevated: #1e293b;
-  --color-bg-muted: #0f172a;
-  --color-bg-muted-strong: #1e293b;
-  --color-bg-control: #0f172a;
-  --color-bg-control-hover: #1e293b;
+  /* Dark Navy/Purple Palette (docs/design/color-system.md) */
+  --color-bg-page: #0e0c2e;
+  --color-bg-page-strong: #080618;
+  --color-bg-panel: rgba(255,255,255,0.05);
+  --color-bg-elevated: rgba(255,255,255,0.08);
+  --color-bg-muted: rgba(255,255,255,0.04);
+  --color-bg-muted-strong: rgba(255,255,255,0.07);
+  --color-bg-control: rgba(255,255,255,0.06);
+  --color-bg-control-hover: rgba(255,255,255,0.1);
 
   --color-border-subtle: rgba(255, 255, 255, 0.04);
   --color-border-strong: rgba(255, 255, 255, 0.08);
@@ -52,10 +52,10 @@
   --color-glass-border: rgba(255, 255, 255, 0.1);
 
   /* ── Typography ── */
-  --font-display: 'Sora', 'Inter', system-ui, sans-serif;
-  --font-heading: 'Sora', 'Inter', system-ui, sans-serif;
-  --font-body: 'Inter', system-ui, sans-serif;
-  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-display: 'Inter', sans-serif;
+  --font-heading: 'Inter', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-ui: 'Inter', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Type scale */
@@ -187,12 +187,22 @@
 
   @keyframes shimmer {
     0% {
-      background-position: -200% center;
+      transform: translateX(-100%);
     }
 
     100% {
-      background-position: 200% center;
+      transform: translateX(200%);
     }
+  }
+}
+
+@keyframes text-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
   }
 }
 
@@ -217,7 +227,7 @@
 
   body {
     @apply transition-colors duration-300;
-    font-family: var(--font-body);
+    font-family: 'Inter', sans-serif;
     color: var(--color-text-primary);
     background: var(--image-gradient-page);
   }
@@ -281,6 +291,21 @@
     letter-spacing: var(--tracking-wide);
   }
 
+  select {
+    color-scheme: dark;
+  }
+
+  select option,
+  select optgroup {
+    background-color: #0f172a;
+    color: var(--color-text-primary);
+  }
+
+  select option:checked {
+    background-color: #164e63;
+    color: #ffffff;
+  }
+
   /* Uppercase section labels */
   .label-caps {
     font-family: var(--font-ui);
@@ -301,24 +326,33 @@
   }
 
   ::-webkit-scrollbar {
-    @apply w-[6px] h-[6px];
+    @apply w-[5px] h-[5px];
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
+    margin-block: 4px;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(99, 102, 241, 0.25);
+    background: rgba(255, 255, 255, 0.12);
     border-radius: 99px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(99, 102, 241, 0.5);
+    background: rgba(255, 255, 255, 0.25);
   }
 }
 
 @layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .glass {
     @apply shadow-[--shadow-panel];
     background: var(--color-glass-bg);

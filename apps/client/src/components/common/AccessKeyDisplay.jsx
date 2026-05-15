@@ -1,16 +1,27 @@
 import React, { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FiCopy, FiCheck } from 'react-icons/fi';
 import { regenerateAccessKey } from '../../api';
+import { queryKeys } from '../../api/queryKeys';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AccessKeyDisplay({ accessKey: initialKey }) {
+  const queryClient = useQueryClient();
   const [accessKey, setAccessKey] = useState(initialKey);
   const [copied, setCopied] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const [error, setError] = useState(null);
+  const regenerateMutation = useMutation({
+    mutationFn: regenerateAccessKey,
+    onSuccess: (data) => {
+      setAccessKey(data.accessKey);
+      setVisible(true);
+      queryClient.invalidateQueries({ queryKey: queryKeys.authStatus() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.config() });
+    },
+  });
 
   const handleCopy = () => {
     navigator.clipboard.writeText(accessKey);
@@ -21,15 +32,10 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
   const handleRegenerate = async () => {
     setShowConfirmModal(false);
     setError(null);
-    setLoading(true);
     try {
-      const data = await regenerateAccessKey();
-      setAccessKey(data.accessKey);
-      setVisible(true);
+      await regenerateMutation.mutateAsync();
     } catch (err) {
       setError(err.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -80,10 +86,10 @@ export default function AccessKeyDisplay({ accessKey: initialKey }) {
           <button
             type="button"
             onClick={() => setShowConfirmModal(true)}
-            disabled={loading}
+            disabled={regenerateMutation.isPending}
             className="px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
           >
-            {loading ? '...' : 'Generate'}
+            {regenerateMutation.isPending ? '...' : 'Generate'}
           </button>
         </div>
         {feedbackLayers}

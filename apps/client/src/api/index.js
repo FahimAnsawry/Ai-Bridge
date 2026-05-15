@@ -60,6 +60,11 @@ export async function clearLogs() {
   return handleResponse(await fetch(`${BASE}/logs`, { method: 'DELETE' }));
 }
 
+/** GET /api/model-distribution */
+export async function fetchModelDistribution() {
+  return handleResponse(await fetch(`${BASE}/model-distribution`));
+}
+
 /** GET /api/models */
 export async function fetchModels() {
   return handleResponse(await fetch(`${BASE}/models`));

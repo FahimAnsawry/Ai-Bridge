@@ -13,12 +13,19 @@ const https = require('https');
 const { getCopilotToken } = require('./copilot-auth');
 
 const COPILOT_API_HOST = 'api.githubcopilot.com';
+const COPILOT_REQUEST_TIMEOUT_MS = Number(process.env.COPILOT_REQUEST_TIMEOUT_MS || 120_000);
 const copilotAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 50,
   maxFreeSockets: 10,
   timeout: 60_000,
 });
+
+function applyRequestTimeout(req, label) {
+  req.setTimeout(COPILOT_REQUEST_TIMEOUT_MS, () => {
+    req.destroy(new Error(`${label} timed out after ${COPILOT_REQUEST_TIMEOUT_MS}ms`));
+  });
+}
 
 // Models that use Anthropic message format via Copilot
 const ANTHROPIC_MODELS = [
@@ -530,6 +537,7 @@ async function proxyCopilotRequest(req, res, targetPath, requestBody, transformO
       reject(err);
     });
 
+    applyRequestTimeout(upstream, 'GitHub Copilot upstream request');
     upstream.write(bodyStr);
     upstream.end();
   });
@@ -566,6 +574,7 @@ async function fetchCopilotModels(user = null) {
     });
 
     req.on('error', reject);
+    applyRequestTimeout(req, 'GitHub Copilot models request');
     req.end();
   });
 }
@@ -641,6 +650,7 @@ async function handleMessages(req, res) {
         });
 
         upstream.on('error', reject);
+        applyRequestTimeout(upstream, 'GitHub Copilot messages request');
         upstream.write(bodyStr);
         upstream.end();
       });
