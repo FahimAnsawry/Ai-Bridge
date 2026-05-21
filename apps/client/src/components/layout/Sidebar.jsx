@@ -8,6 +8,7 @@ import {
   X,
   Boxes,
   FileText,
+  BookOpen,
   LogOut,
 } from 'lucide-react';
 
@@ -21,7 +22,8 @@ const menuItems = [
   { name: 'Settings', icon: Settings, path: '/settings' },
   { name: 'Logs', icon: FileText, path: '/logs' },
   { name: 'Models', icon: Boxes, path: '/models' },
-  ];
+  { name: 'Docs', icon: BookOpen, path: '/docs' },
+];
 
 const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
   useEffect(() => {

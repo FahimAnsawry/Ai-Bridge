@@ -254,16 +254,16 @@ const Overview = ({ user }) => {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
+    <div className="flex min-h-full flex-col gap-5 overflow-x-hidden overflow-y-auto lg:h-full lg:min-h-0 lg:overflow-hidden">
       <div className="shrink-0">
         <PageHeader isConnected={!fetchError} onRefresh={handleRefresh} isRefreshing={isRefreshing} />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 lg:overflow-hidden">
         {fetchError ? (
           <ErrorState message={fetchError} onRetry={handleRefresh} />
         ) : (
-          <div className="flex h-full min-h-0 flex-col gap-5">
+          <div className="flex min-h-0 flex-col gap-5 lg:h-full">
             {/* KPI grid */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {kpis.map((kpi, i) => (
@@ -272,7 +272,7 @@ const Overview = ({ user }) => {
             </div>
 
             {/* Charts row */}
-            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="grid min-h-[32rem] min-w-0 flex-1 grid-cols-1 gap-4 lg:min-h-0 lg:grid-cols-2">
               <div className="min-h-0 min-w-0">
                 <ModelDistribution data={modelDistributionData} loading={false} />
               </div>
