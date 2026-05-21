@@ -26,7 +26,7 @@ function DashboardLoadingShell({ currentPath }) {
 
   return (
     <div
-      className="flex h-screen overflow-hidden text-[--color-text-primary]"
+      className="flex h-dvh overflow-hidden text-[--color-text-primary]"
       style={{ background: 'linear-gradient(135deg, #161168 0%, #292373 40%, #3E297A 70%, #522583 100%)' }}
     >
       <Sidebar
@@ -36,7 +36,7 @@ function DashboardLoadingShell({ currentPath }) {
         onToggleMobile={() => {}}
       />
 
-      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-16 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'max-sm:pt-14 max-sm:overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'h-full min-h-0 overflow-hidden' : ''}`}>
           {isSettingsPage ? <SettingsSkeleton /> : isDashboardPage ? <OverviewSkeleton /> : null}
         </div>
@@ -110,7 +110,7 @@ function AppContent() {
 
   return (
     <LiveLogsProvider user={user}>
-    <div className='flex h-screen text-[--color-text-primary] overflow-hidden' style={{ background: 'linear-gradient(135deg, #161168 0%, #292373 40%, #3E297A 70%, #522583 100%)' }}>
+    <div className='flex h-dvh text-[--color-text-primary] overflow-hidden' style={{ background: 'linear-gradient(135deg, #161168 0%, #292373 40%, #3E297A 70%, #522583 100%)' }}>
 
       {!isModalWindowVisible && (
         <Sidebar
@@ -122,7 +122,7 @@ function AppContent() {
         />
       )}
 
-      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-4 pb-8 pt-16 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'max-sm:pt-14 max-sm:overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'h-full min-h-0 overflow-hidden' : ''}`}>
           <Routes>
             <Route path='/' element={<Navigate to="/dashboard" replace />} />

@@ -78,11 +78,11 @@ const SETTINGS_CARD_THEMES = {
 
 const SOFT_PANEL = 'rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]';
 const SETTINGS_LABEL = 'text-[10px] font-extrabold uppercase tracking-[0.2em] text-white';
-const FIELD_CLASS = 'w-full rounded-xl border border-white/25 bg-slate-950/45 px-4 py-2.5 text-xs font-semibold text-white placeholder:text-white/68 outline-none [color-scheme:dark] focus:border-white/55 focus:bg-slate-950/60 disabled:cursor-not-allowed disabled:opacity-60';
+const FIELD_CLASS = 'w-full rounded-xl border border-white/25 bg-slate-950/45 px-3.5 py-3 text-sm font-semibold text-white placeholder:text-white/68 outline-none [color-scheme:dark] focus:border-white/55 focus:bg-slate-950/60 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:py-2.5 sm:text-xs';
 const KEY_PREVIEW_CLASS = 'min-h-10 flex-1 rounded-xl border border-white/30 bg-slate-950/60 px-4 py-2.5 font-mono text-xs font-extrabold tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]';
-const ICON_BUTTON = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white/85 hover:bg-slate-950/55 hover:text-white disabled:cursor-not-allowed disabled:opacity-50';
+const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white/85 hover:bg-slate-950/55 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 sm:w-10';
 const REMOVE_KEY_BUTTON = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-300/35 bg-rose-950/35 text-rose-100 hover:bg-rose-500 hover:text-white transition-colors cursor-pointer';
-const PRIMARY_BUTTON = 'inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/30 bg-slate-950/35 px-5 py-2.5 text-[11px] font-extrabold uppercase tracking-wider text-white hover:bg-slate-950/50 disabled:cursor-not-allowed disabled:opacity-60';
+const PRIMARY_BUTTON = 'inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/30 bg-slate-950/35 px-4 py-3 text-[11px] font-extrabold uppercase tracking-wider text-white hover:bg-slate-950/50 disabled:cursor-not-allowed disabled:opacity-60 sm:px-5 sm:py-2.5';
 const SECONDARY_BUTTON = 'rounded-xl border border-white/25 bg-slate-950/30 px-4 py-2.5 text-xs font-extrabold text-white/85 hover:bg-slate-950/45 hover:text-white';
 const ROUTES_BUTTON = 'inline-flex items-center gap-1.5 rounded-full border border-cyan-200/45 bg-cyan-300/15 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-cyan-50 shadow-[0_0_18px_-8px_rgba(34,211,238,0.95)] hover:border-cyan-100/70 hover:bg-cyan-300/25 hover:text-white hover:shadow-[0_0_24px_-7px_rgba(45,212,191,1)] transition-all';
 const FALLBACK_SELECT = 'w-full appearance-none rounded-xl border border-cyan-200/40 bg-cyan-950/55 px-3.5 py-2.5 pr-9 text-[10px] font-extrabold uppercase tracking-[0.12em] text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_24px_rgba(8,47,73,0.22)] [color-scheme:dark] hover:border-cyan-100/60 hover:bg-cyan-900/60 focus:border-cyan-100 focus:bg-cyan-950/70 focus:outline-none';
@@ -228,16 +228,16 @@ function CopilotAuthCard({
         onClick={() => setIsOpen((value) => !value)}
         className="relative z-10 flex w-full items-center justify-between gap-3 text-left cursor-pointer"
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-white/25 bg-slate-950/35">
             <GitBranch size={16} className={isConnected ? 'text-emerald-200' : 'text-white/80'} />
           </div>
-          <div>
-            <h3 className="text-[13px] font-bold text-white">GitHub Copilot</h3>
+          <div className="min-w-0">
+            <h3 className="truncate text-[13px] font-bold text-white">GitHub Copilot</h3>
 
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-widest ${isConnected ? 'bg-emerald-500/20 text-emerald-100' : isAuthed ? 'bg-amber-500/20 text-amber-100' : 'bg-slate-950/35 text-white'
             }`}>
             {isConnected ? 'Connected' : isAuthed ? 'Authorized' : (<><XCircle size={10} /> Not Connected</>)}
@@ -373,22 +373,22 @@ const mapConfigToForm = (cfg = {}, accessKey = '') => ({
 // Memoized ProviderCard component to prevent unnecessary re-renders
 const ProviderCard = React.memo(({ provider, routedCount, keyCount, onEdit, onRoute, onRemove }) => {
   return (
-    <div className={`${SOFT_PANEL} group relative overflow-hidden p-4 flex flex-col gap-4`}>
+    <div className={`${SOFT_PANEL} group relative overflow-hidden p-3.5 sm:p-4 flex flex-col gap-3.5 sm:gap-4`}>
       <div className="relative z-10 flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <h4 className="font-bold text-white tracking-tight text-sm truncate">{provider.name || 'Unnamed Provider'}</h4>
-          <p className="text-[10px] text-white/60 font-mono truncate mt-0.5">{provider.baseUrl || 'No URL'}</p>
+          <h4 className="font-bold text-white tracking-tight text-sm break-words sm:truncate">{provider.name || 'Unnamed Provider'}</h4>
+          <p className="text-[10px] text-white/60 font-mono break-all mt-0.5 sm:truncate">{provider.baseUrl || 'No URL'}</p>
         </div>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRemove(provider.id); }}
-          className="p-1.5 shrink-0 rounded-lg text-white/30 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+          className="p-2 shrink-0 rounded-lg text-rose-200/80 bg-rose-500/10 hover:text-rose-100 hover:bg-rose-500/20 transition-all cursor-pointer sm:opacity-0 sm:group-hover:opacity-100"
         >
           <Trash2 size={14} />
         </button>
       </div>
 
-      <div className="relative z-10 flex items-center gap-3">
+      <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span className="inline-flex items-center gap-1 text-[10px] text-white/50">
           <span className="w-1 h-1 rounded-full bg-emerald-400/60" />
           Active
@@ -403,14 +403,14 @@ const ProviderCard = React.memo(({ provider, routedCount, keyCount, onEdit, onRo
         </span>
       </div>
 
-      <div className="relative z-10 flex items-center gap-2">
+      <div className="relative z-10 grid grid-cols-2 gap-2 sm:flex sm:items-center">
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onEdit(provider.id);
           }}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/25 bg-white/5 px-4 py-2.5 text-[11px] font-bold text-white hover:bg-white/10 hover:border-white/35 transition-all cursor-pointer"
+          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/25 bg-white/5 px-3 py-2.5 text-[11px] font-bold text-white hover:bg-white/10 hover:border-white/35 transition-all cursor-pointer sm:flex-1 sm:px-4"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Edit
@@ -421,7 +421,7 @@ const ProviderCard = React.memo(({ provider, routedCount, keyCount, onEdit, onRo
             e.stopPropagation();
             onRoute(provider.id);
           }}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2.5 text-[11px] font-bold text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/50 hover:text-cyan-100 transition-all cursor-pointer shadow-[0_0_20px_-6px_rgba(34,211,238,0.3)] hover:shadow-[0_0_28px_-4px_rgba(34,211,238,0.5)]"
+          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2.5 text-[11px] font-bold text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/50 hover:text-cyan-100 transition-all cursor-pointer shadow-[0_0_20px_-6px_rgba(34,211,238,0.3)] hover:shadow-[0_0_28px_-4px_rgba(34,211,238,0.5)] sm:flex-1 sm:px-4"
         >
           <Route size={13} />
           Routes
@@ -474,9 +474,9 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
   };
 
   return (
-    <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-5 lg:p-6 overflow-hidden max-sm:h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
+    <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-4 lg:p-6 overflow-hidden max-sm:h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
       <div className="flex items-center justify-between gap-3 shrink-0">
-        <h2 className="text-lg font-bold text-white flex items-center gap-3 tracking-tight">
+        <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
           <KeyRound className="text-white/80" size={20} />
           API Config
         </h2>
@@ -489,22 +489,22 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
         </span>
       </div>
 
-      <div className="mt-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1 space-y-4 border-t border-white/15 pt-5">
-        <div className={`${SOFT_PANEL} p-4`}>
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white">
+      <div className="mt-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-3 border-t border-white/15 pt-4 sm:mt-5 sm:space-y-4 sm:pr-1 sm:pt-5">
+        <div className={`${SOFT_PANEL} p-3.5 sm:p-4`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white sm:mt-0.5">
               <Link2 size={16} />
             </div>
             <div className="min-w-0 flex-1 space-y-2">
               <label className={SETTINGS_LABEL}>Base URL</label>
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-xs font-semibold text-white break-all">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-[11px] font-semibold leading-5 text-white break-all sm:text-xs">
                   {baseUrl}
                 </div>
                 <button
                   type="button"
                   onClick={() => copyValue('baseUrl', baseUrl)}
-                  className={ICON_BUTTON}
+                  className={`${ICON_BUTTON} w-full sm:w-10`}
                   title="Copy base URL"
                 >
                   {copiedField === 'baseUrl' ? <Check size={15} /> : <Copy size={15} />}
@@ -514,22 +514,22 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
           </div>
         </div>
 
-        <div className={`${SOFT_PANEL} p-4`}>
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white">
+        <div className={`${SOFT_PANEL} p-3.5 sm:p-4`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white sm:mt-0.5">
               <KeyRound size={16} />
             </div>
             <div className="min-w-0 flex-1 space-y-2">
               <label className={SETTINGS_LABEL}>Access Key</label>
-              <div className="flex items-center gap-2">
-                <div className={`min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-xs break-all ${hasAccessKey ? 'font-semibold text-white' : 'font-semibold text-white/82'}`}>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                <div className={`col-span-2 min-w-0 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-[11px] leading-5 break-all sm:flex-1 sm:text-xs ${hasAccessKey ? 'font-semibold text-white' : 'font-semibold text-white/82'}`}>
                   {hasAccessKey ? (isKeyVisible ? accessKey : '••••••••••••••••') : 'No access key available'}
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsKeyVisible((value) => !value)}
                   disabled={!hasAccessKey}
-                  className={ICON_BUTTON}
+                  className={`${ICON_BUTTON} w-full sm:w-10`}
                   title={isKeyVisible ? 'Hide access key' : 'Show access key'}
                 >
                   {isKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -538,7 +538,7 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
                   type="button"
                   onClick={() => copyValue('accessKey', accessKey)}
                   disabled={!hasAccessKey}
-                  className={ICON_BUTTON}
+                  className={`${ICON_BUTTON} w-full sm:w-10`}
                   title="Copy access key"
                 >
                   {copiedField === 'accessKey' ? <Check size={15} /> : <Copy size={15} />}
@@ -1043,12 +1043,12 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto h-[calc(100vh-100px)] max-sm:h-auto flex flex-col pt-2 lg:py-6 px-4 sm:px-6 lg:px-10 overflow-hidden max-sm:overflow-visible">
-      <header className="shrink-0 space-y-1 sm:space-y-2 pb-1 sm:pb-2 border-b border-white/15">
+    <div className="mx-auto flex h-[calc(100dvh-5.75rem)] w-full max-w-7xl flex-col overflow-hidden px-1 pt-1 sm:h-[calc(100vh-120px)] sm:px-6 lg:h-[calc(100vh-100px)] lg:px-10 lg:py-6">
+      <header className="shrink-0 space-y-1 border-b border-white/15 pb-2 sm:space-y-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-4xl font-extrabold tracking-tight text-white">System Settings</h1>
-            <p className="text-white/82 text-sm font-medium">Configure your gateway, providers, and security.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight text-white sm:text-4xl">System Settings</h1>
+            <p className="text-xs font-medium text-white/82 sm:text-sm">Configure your gateway, providers, and security.</p>
           </div>
           {saveStatus.state !== 'idle' && (
             <div
@@ -1066,11 +1066,11 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
         </div>
       </header>
 
-      <form onSubmit={handleSave} className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 overflow-hidden max-sm:overflow-visible pb-4 pt-2 min-h-0">
-        <div className="lg:col-span-6 flex-1 flex flex-col min-h-0 overflow-hidden max-sm:min-h-0 max-sm:flex-none">
-          <Card className="flex-1 flex flex-col min-h-0 p-5 lg:p-6 overflow-hidden max-sm:flex-none" style={SETTINGS_CARD_THEMES.activeModel}>
-            <div className="flex items-center justify-between mb-5 shrink-0">
-              <h2 className="text-lg font-bold text-white flex items-center gap-3 tracking-tight">
+      <form onSubmit={handleSave} className="flex-1 flex flex-col gap-4 overflow-y-auto pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 lg:grid lg:grid-cols-12 lg:gap-8 lg:overflow-hidden lg:pr-0">
+        <div className="lg:col-span-6 flex min-h-0 flex-col">
+          <Card className="flex min-h-[min(520px,62dvh)] flex-col p-4 sm:p-5 lg:min-h-0 lg:flex-1 lg:p-6 overflow-hidden" style={SETTINGS_CARD_THEMES.activeModel}>
+            <div className="flex items-center justify-between mb-4 shrink-0 sm:mb-5">
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
                 <Globe className="text-white/80" size={20} />
                 Providers
               </h2>
@@ -1101,7 +1101,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
               </div>
 
               {/* Scrollable: Custom Provider cards */}
-              <div className="relative flex-1 min-h-0 mt-3 max-sm:h-[40vh] max-sm:min-h-[200px]">
+              <div className="relative flex-1 min-h-0 mt-3">
                 <div
                   ref={providerListRef}
                   onScroll={updateProviderScrollState}
@@ -1124,7 +1124,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
           </Card>
         </div>
 
-        <div className="lg:col-span-6 flex-1 flex flex-col space-y-6 overflow-hidden min-h-0">
+        <div className="lg:col-span-6 flex min-h-0 flex-col space-y-4 sm:space-y-6 lg:overflow-hidden">
           <ApiConfigCard
             baseUrl={gatewayBaseUrl}
             accessKey={currentAccessKey}
