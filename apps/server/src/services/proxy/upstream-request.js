@@ -9,6 +9,7 @@ const {
 } = require('./message-normalization');
 const {
   isFreeModelProvider,
+  isCcFreeModelProvider,
   isBlazeApiProvider,
   isCpassProvider,
   normalizeBlazeApiBaseUrl,
@@ -79,7 +80,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     name: req.__upstreamProviderName,
     id: req.__upstreamProviderId,
   });
-  const isAnthropicCompatible = isAnthropic || isCpassRequest;
+  const isAnthropicCompatible = isAnthropic || isCpassRequest || isCcFreeModelProvider(baseUrl);
   req.__upstreamProviderIsAnthropicCompatible = isAnthropicCompatible;
   if (isCopilotBridge) {
     headers['x-ai-bridge-upstream-hop'] = '1';
@@ -203,7 +204,7 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     // Claude CLI includes its built-in tools on every subsequent request, which
     // causes FreeModel to return an error. We strip all tool-related fields and
     // flatten tool turns into plain-text so the conversation history stays valid.
-    if (isFreeModelProvider(baseUrl)) {
+    if (isFreeModelProvider(baseUrl) && !isCcFreeModelProvider(baseUrl)) {
       // FreeModel returns 401 on streaming requests — force non-streaming
       bodyData.stream = false;
       delete bodyData.tools;
@@ -303,8 +304,6 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
     if (/claude/i.test(bodyData.model)) {
       bodyData.model = bodyData.model
         // First normalise hyphens → dots for opus-4.6
-        .replace(/claude-opus-4-7/g, 'claude-opus-4.6')
-        // Map claude-opus-4-7 / claude-opus-4.7 (new Opus 4.7 CLI default) → opus-4.6
         .replace(/claude-opus-4[-.]7[\w.-]*/g, 'claude-opus-4.6')
         // Map sonnet (any variant) → opus
         .replace(/claude-sonnet-[\w.-]+/g, 'claude-opus-4.6')

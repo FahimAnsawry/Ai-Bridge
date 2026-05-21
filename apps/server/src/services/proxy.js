@@ -695,7 +695,7 @@ async function proxyRequest(req, res) {
     req.body.model = req.body.model
       .replace(/claude-opus-4-6/g, 'claude-opus-4.6')
       // Map claude-opus-4-7 (Opus 4.7 — new CLI default) → opus-4.6
-      .replace(/claude-opus-4[-.]7[\w.-]*/g, 'claude-opus-4.6')
+      // .replace(/claude-opus-4[-.]7[\w.-]*/g, 'claude-opus-4.6')
       .replace(/claude-sonnet-[\w.-]+/g, 'claude-opus-4.6')
       .replace(/claude-haiku-[\w.-]+/g, 'claude-opus-4.6')
       .replace(/claude-3-[\w.-]+-sonnet[\w.-]*/g, 'claude-opus-4.6')
@@ -880,9 +880,6 @@ async function proxyRequest(req, res) {
 
         try {
           const obj = JSON.parse(payload);
-          if (obj.type === 'message_delta' && obj.usage) {
-            console.log('[proxy] Cpass message_delta usage:', JSON.stringify(obj.usage));
-          }
           captureUsage(obj);
           captureCompletionText(
             obj?.delta?.text ||

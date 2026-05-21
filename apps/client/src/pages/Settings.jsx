@@ -1043,7 +1043,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto h-[calc(100vh-165px)] max-sm:h-auto flex flex-col pt-2 lg:py-6 px-4 sm:px-6 lg:px-10 overflow-hidden max-sm:overflow-visible">
+    <div className="max-w-7xl mx-auto h-[calc(100vh-100px)] max-sm:h-auto flex flex-col pt-2 lg:py-6 px-4 sm:px-6 lg:px-10 overflow-hidden max-sm:overflow-visible">
       <header className="shrink-0 space-y-1 sm:space-y-2 pb-1 sm:pb-2 border-b border-white/15">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>

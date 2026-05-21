@@ -87,6 +87,11 @@ function normalizeClaudeModelAlias(model) {
     return 'claude-sonnet-4.6';
   }
 
+  // Short alias: --model opus  →  claude-opus-4-7
+  if (/^\.?opus$/i.test(normalized)) {
+    return 'claude-opus-4-7';
+  }
+
   // Claude Code /model → Sonnet 4.6 (standard): claude-sonnet-4-6, claude-sonnet-4.6, claude-sonnet-4-6-20250514
   if (/^claude-sonnet-4[-.]6(?:-\d{8})?$/i.test(normalized)) {
     return 'claude-sonnet-4-6';
@@ -97,9 +102,9 @@ function normalizeClaudeModelAlias(model) {
     return 'claude-sonnet-4.6';
   }
 
-  // Map claude-opus-4.7 to claude-opus-4-6 (handles: claude-opus-4-7, claude-opus-4.7, claude-opus-4-7-20250514, etc.)
-  if (/^claude-opus-4[-.]7/i.test(normalized)) {
-    return 'claude-opus-4-6';
+  // Claude Code /model → Opus 4.7: claude-opus-4.7, claude-opus-4-7, claude-opus-4-7-20250514
+  if (/^claude-opus-4[-.]7(?:-\d{8})?$/i.test(normalized)) {
+    return 'claude-opus-4-7';
   }
 
   return model;

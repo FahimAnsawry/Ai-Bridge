@@ -8,7 +8,7 @@ const { loadConfig } = require('../config/config');
 const { morganStream } = require('../middleware/logger');
 const v1Router = require('../routes/v1');
 const copilotRouter = require('../routes/copilot');
-const { syncSwiftRouterModels } = require('./swiftrouter-sync');
+const { syncSwiftRouterModels } = require('./model-catalog-sync');
 
 function createProxyRuntime(options = {}) {
   const userId = options.userId; // user context is now required

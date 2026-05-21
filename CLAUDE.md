@@ -55,7 +55,7 @@ AI Tool → POST :3000/v1/messages
 | `apps/server/src/services/admin-service.js` | Dashboard business logic: status, config CRUD, logs, model catalog, provider health |
 | `apps/server/src/services/copilot-proxy.js` | Translates Anthropic format → GitHub Copilot API |
 | `apps/server/src/services/copilot-auth.js` | GitHub Device Flow OAuth for Copilot token acquisition |
-| `apps/server/src/services/swiftrouter-sync.js` | Syncs model catalog from SwiftRouter's `/models` endpoint |
+| `apps/server/src/services/model-catalog-sync.js` | Syncs model catalogs from provider `/models` endpoints |
 
 ### Protocol translation
 

@@ -1,8 +1,8 @@
 /**
- * swiftrouter-sync.js
+ * model-catalog-sync.js
  *
- * Pulls live model IDs from SwiftRouter's OpenAI-compatible /models endpoint,
- * normalizes them into config.custom_models, and derives a lightweight
+ * Pulls live model IDs from provider OpenAI-compatible /models endpoints,
+ * normalizes them into model catalogs, and derives a lightweight
  * offerings summary for UI display.
  */
 

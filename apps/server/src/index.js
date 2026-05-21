@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); // Load env variables early
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env'), override: false });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: false });
 require('./config/console-timestamp'); // Patch console.* with ISO timestamps
 require('./config/db'); // Connect to MongoDB
 const express = require('express');
@@ -21,15 +22,44 @@ const passport = require('./config/passport');
 const { requireAuth } = require('./middleware/auth-middleware');
 const { loadGuestUser } = require('./config/guest-store');
 
+const isProduction = process.env.NODE_ENV === 'production';
+const defaultBindHost = isProduction ? '0.0.0.0' : '127.0.0.1';
+
+function parseAllowedOrigins() {
+  const configured = process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '';
+  const origins = configured.split(',').map((origin) => origin.trim()).filter(Boolean);
+
+  if (origins.length === 0) return isProduction ? false : '*';
+  if (origins.includes('*')) return '*';
+  return origins;
+}
+
+function getPublicBaseUrl(bindHost, port) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/$/, '');
+
+  const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
+  return `http://${displayHost}:${port}`;
+}
+
+function getSessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  if (isProduction) throw new Error('SESSION_SECRET must be set in production.');
+  return 'fallback-secret';
+}
+
 function createWebServer(options = {}) {
   const runtime = options.runtime || createProxyRuntime({ 
-    host: options.host || '127.0.0.1', 
+    host: options.runtimeHost || '127.0.0.1', 
     userId: options.userId || 'default' 
   });
   const app = express();
   const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
   const hasClientDist = fs.existsSync(path.join(clientDistPath, 'index.html'));
   const frontendUrl = options.frontendUrl || process.env.FRONTEND_URL || 'http://localhost:5174';
+  const allowedOrigins = parseAllowedOrigins();
+
+  if (isProduction) app.set('trust proxy', 1);
 
   function frontendRedirect(pathname) {
     if (hasClientDist) return pathname;
@@ -41,7 +71,7 @@ function createWebServer(options = {}) {
 
   app.use(
     cors({
-      origin: '*',
+      origin: allowedOrigins,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version'],
     })
@@ -56,7 +86,7 @@ function createWebServer(options = {}) {
   });
 
   app.use(session({
-    secret: process.env.SESSION_SECRET || 'fallback-secret',
+    secret: getSessionSecret(),
     resave: false,
     saveUninitialized: false,
     ...(useMongoSessionStore
@@ -69,7 +99,7 @@ function createWebServer(options = {}) {
         }
       : {}),
     cookie: {
-      secure: false,
+      secure: isProduction,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
     },
@@ -165,7 +195,7 @@ function createWebServer(options = {}) {
 async function startStandaloneServer() {
   const { mongoose, User } = require('./config/db');
 
-  const bindHost = process.env.HOST || '127.0.0.1';
+  const bindHost = process.env.HOST || defaultBindHost;
   const port = Number(process.env.PORT || 3000);
 
   // Wait for MongoDB to connect if it's not ready yet
@@ -196,25 +226,26 @@ async function startStandaloneServer() {
   }
 
   const runtime = createProxyRuntime({
-    host: bindHost,
+    host: '127.0.0.1',
     publicPort: port,
     userId,
     embedded: true,
   });
   const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
   const hasClientDist = fs.existsSync(path.join(clientDistPath, 'index.html'));
-  const baseUrl = `http://${bindHost}:${port}`;
+  const baseUrl = getPublicBaseUrl(bindHost, port);
   const dashboardUrl = hasClientDist ? baseUrl : 'http://localhost:5174 (Vite dev server)';
   const { app } = createWebServer({
     runtime,
+    runtimeHost: '127.0.0.1',
     dashboardUrl,
-    frontendUrl: 'http://localhost:5174',
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5174',
   });
   await runtime.start();
 
   const server = app.listen(port, bindHost, async () => {
     const state = await runtime.getState();
-    const endpoint = state.endpoint || `http://${bindHost}:${port}/v1`;
+    const endpoint = state.endpoint || `${baseUrl}/v1`;
     console.log('');
     console.log('AI Proxy Server - SwiftRouter');
     console.log(`Proxy:     ${endpoint}`);
@@ -224,7 +255,7 @@ async function startStandaloneServer() {
   });
 
   const io = new SocketIOServer(server, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
+    cors: { origin: parseAllowedOrigins(), methods: ['GET', 'POST'] },
   });
   attachSocketIO(io);
 

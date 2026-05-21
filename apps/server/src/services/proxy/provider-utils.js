@@ -51,12 +51,20 @@ function isCpassProvider(providerOrBaseUrl) {
     String(name).toLowerCase().includes('cpass');
 }
 
+function isCcFreeModelProvider(providerOrBaseUrl) {
+  const baseUrl = typeof providerOrBaseUrl === 'string'
+    ? providerOrBaseUrl
+    : providerOrBaseUrl?.baseUrl;
+  return typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('cc.freemodel.dev');
+}
+
 function isAnthropicCompatibleProvider(providerOrBaseUrl) {
   const baseUrl = typeof providerOrBaseUrl === 'string'
     ? providerOrBaseUrl
     : providerOrBaseUrl?.baseUrl;
   return (typeof baseUrl === 'string' && baseUrl.toLowerCase().includes('anthropic.com')) ||
-    isCpassProvider(providerOrBaseUrl);
+    isCpassProvider(providerOrBaseUrl) ||
+    isCcFreeModelProvider(providerOrBaseUrl);
 }
 
 function normalizeBlazeApiBaseUrl(baseUrl) {
@@ -113,6 +121,7 @@ module.exports = {
   normalizeTimyModel,
   getTimyUnsupportedModelMessage,
   isFreeModelProvider,
+  isCcFreeModelProvider,
   isBlazeApiProvider,
   isCpassProvider,
   isAnthropicCompatibleProvider,
