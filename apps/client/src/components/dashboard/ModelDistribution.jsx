@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   PieChart,
@@ -56,7 +56,20 @@ const CustomLabel = ({ cx, cy, midAngle, outerRadius, percent, name, requests })
 
 const COLORS = ['#6366f1', '#10b981', '#a855f7', '#fb7185', '#22d3ee', '#fbbf24', '#818cf8', '#34d399'];
 
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return isMobile;
+};
+
 const ModelDistribution = ({ data = [], loading = false }) => {
+  const isMobile = useIsMobile();
+
   if (loading) {
     return (
       <div
@@ -82,7 +95,7 @@ const ModelDistribution = ({ data = [], loading = false }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.3 }}
-      className="relative h-full rounded-2xl overflow-hidden flex flex-col px-5 py-4"
+      className="relative h-[20rem] lg:h-full rounded-2xl overflow-hidden flex flex-col px-5 py-4"
       style={GLASS}
     >
       <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 55%)' }} />
@@ -104,20 +117,20 @@ const ModelDistribution = ({ data = [], loading = false }) => {
           </p>
         </div>
       ) : (
-        <div className="relative z-10 min-h-0 min-w-0 flex-1">
-          <div className="h-full min-h-[210px] min-w-0 w-full">
+        <div className="relative z-10 min-h-0 min-w-0 flex-1 flex flex-col justify-between">
+          <div className={`${isMobile ? 'h-[160px]' : 'h-full min-h-[210px]'} min-w-0 w-full`}>
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-              <PieChart margin={{ top: 8, right: 130, bottom: 8, left: 130 }}>
+              <PieChart margin={isMobile ? { top: 4, right: 10, bottom: 4, left: 10 } : { top: 8, right: 130, bottom: 8, left: 130 }}>
                 <Pie
                   data={data}
                   cx="50%"
-                  cy="54%"
+                  cy={isMobile ? "50%" : "54%"}
                   innerRadius={0}
-                  outerRadius="62%"
+                  outerRadius={isMobile ? "80%" : "62%"}
                   paddingAngle={0}
                   dataKey="requests"
                   labelLine={false}
-                  label={CustomLabel}
+                  label={isMobile ? null : CustomLabel}
                   isAnimationActive={false}
                 >
                   {data.map((entry, index) => (
@@ -132,6 +145,18 @@ const ModelDistribution = ({ data = [], loading = false }) => {
               </PieChart>
             </ResponsiveContainer>
           </div>
+
+          {isMobile && (
+            <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 text-[11px] font-semibold max-h-[64px] overflow-y-auto custom-scrollbar">
+              {data.map((item, idx) => (
+                <div key={item.name} className="flex items-center gap-1 text-white/90">
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                  <span className="truncate max-w-[90px]">{item.name}</span>
+                  <span className="text-white/50">({item.percentage.toFixed(0)}%)</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </motion.div>

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 
 const OverviewSkeleton = () => {
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
+    <div className="flex min-h-full flex-col gap-5 overflow-x-hidden lg:h-full lg:min-h-0 lg:overflow-hidden">
       <div className="shrink-0">
         <div
           className="h-16 rounded-2xl animate-pulse"
@@ -15,15 +15,15 @@ const OverviewSkeleton = () => {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <div className="flex h-full min-h-0 flex-col gap-5">
+      <div className="min-h-0 flex-1 lg:overflow-hidden">
+        <div className="flex min-h-0 flex-col gap-5 lg:h-full">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <SkeletonCard key={i} index={i} />
             ))}
           </div>
 
-          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="grid min-h-[32rem] min-w-0 flex-1 grid-cols-1 gap-4 lg:min-h-0 lg:grid-cols-2">
             <div className="min-h-0 min-w-0">
               <SkeletonChart />
             </div>
@@ -39,7 +39,7 @@ const OverviewSkeleton = () => {
 
 const SkeletonCard = ({ index }) => (
   <div
-    className="relative h-[96px] overflow-hidden rounded-2xl p-4 sm:h-[104px] sm:p-5"
+    className="relative h-[92px] overflow-hidden rounded-2xl p-3.5 sm:h-[104px] sm:p-5"
     style={{
       background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
       backdropFilter: 'blur(16px)',
@@ -83,7 +83,7 @@ const SkeletonCard = ({ index }) => (
 
 const SkeletonChart = () => (
   <div
-    className="relative h-full min-h-0 overflow-hidden rounded-2xl"
+    className="relative h-[20rem] lg:h-full min-h-0 overflow-hidden rounded-2xl"
     style={{
       background: 'linear-gradient(135deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.045) 100%)',
       backdropFilter: 'blur(22px)',
@@ -162,7 +162,7 @@ const SkeletonChart = () => (
 
 const SkeletonActivityFeed = () => (
   <div
-    className="relative h-full min-h-0 overflow-hidden rounded-2xl"
+    className="relative h-[22rem] lg:h-full min-h-0 overflow-hidden rounded-2xl"
     style={{
       background: 'linear-gradient(135deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.045) 100%)',
       backdropFilter: 'blur(22px)',

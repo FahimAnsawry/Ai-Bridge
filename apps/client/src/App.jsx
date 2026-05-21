@@ -36,8 +36,8 @@ function DashboardLoadingShell({ currentPath }) {
         onToggleMobile={() => {}}
       />
 
-      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'h-full min-h-0 overflow-hidden' : ''}`}>
+      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'lg:overflow-hidden overflow-y-auto' : 'overflow-y-auto'}`}>
+        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'lg:h-full lg:min-h-0 lg:overflow-hidden' : ''}`}>
           {isSettingsPage ? <SettingsSkeleton /> : isDashboardPage ? <OverviewSkeleton /> : null}
         </div>
       </main>
@@ -61,6 +61,10 @@ function AppContent() {
   });
   const user = authQuery.data?.user || null;
   const loading = authQuery.isPending;
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -101,7 +105,7 @@ function AppContent() {
       <Routes>
         <Route path='/' element={<Home />} />
         <Route path='/about' element={<About />} />
-        <Route path='/docs' element={<Docs />} />
+        <Route path='/docs' element={<Docs user={user} />} />
         <Route path='/login' element={<Login />} />
         <Route path='*' element={<Navigate to='/' replace />} />
       </Routes>
@@ -122,15 +126,16 @@ function AppContent() {
         />
       )}
 
-      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'h-full min-h-0 overflow-hidden' : ''}`}>
+      <main className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-5 pt-18 sm:px-8 sm:pb-12 sm:pt-20 lg:pt-10 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'lg:overflow-hidden overflow-y-auto' : 'overflow-y-auto'}`}>
+        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'lg:h-full lg:min-h-0 lg:overflow-hidden' : ''}`}>
           <Routes>
             <Route path='/' element={<Navigate to="/dashboard" replace />} />
             <Route path='/dashboard' element={<Overview user={user} />} />
             <Route path='/settings' element={<Settings user={user} onModalVisibilityChange={setIsModalWindowVisible} />} />
             <Route path='/logs' element={<Logs user={user} onModalVisibilityChange={setIsModalWindowVisible} />} />
             <Route path='/models' element={<Models user={user} />} />
-                        <Route path='*' element={<Navigate to='/dashboard' replace />} />
+            <Route path='/docs' element={<Docs user={user} />} />
+            <Route path='*' element={<Navigate to='/dashboard' replace />} />
           </Routes>
         </div>
       </main>

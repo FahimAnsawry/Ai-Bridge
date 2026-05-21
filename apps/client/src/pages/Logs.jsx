@@ -109,7 +109,7 @@ const Logs = ({ user, onModalVisibilityChange }) => {
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="flex h-[calc(100dvh-8rem)] flex-col gap-3 overflow-hidden mx-auto w-full max-w-6xl lg:h-[calc(100dvh-5.5rem)]"
+      className="flex flex-col gap-3 mx-auto w-full max-w-6xl overflow-y-auto lg:h-[calc(100dvh-5.5rem)] lg:overflow-hidden"
     >
       <ConfirmationModal
         isOpen={isClearModalOpen}

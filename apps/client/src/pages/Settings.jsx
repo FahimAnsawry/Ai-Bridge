@@ -474,7 +474,7 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
   };
 
   return (
-    <Card className="flex flex-col min-h-0 h-[calc(100vh-220px)] p-4 lg:p-6 overflow-hidden max-sm:h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
+    <Card className="flex flex-col min-h-0 lg:h-full p-4 sm:p-5 lg:p-6 lg:overflow-hidden h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
       <div className="flex items-center justify-between gap-3 shrink-0">
         <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
           <KeyRound className="text-white/80" size={20} />
@@ -489,7 +489,7 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
         </span>
       </div>
 
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-3 border-t border-white/15 pt-4 sm:mt-5 sm:space-y-4 sm:pr-1 sm:pt-5">
+      <div className="mt-4 flex-1 min-h-0 lg:overflow-y-auto custom-scrollbar space-y-3 border-t border-white/15 pt-4 sm:mt-5 sm:space-y-4 sm:pr-1 sm:pt-5">
         <div className={`${SOFT_PANEL} p-3.5 sm:p-4`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white sm:mt-0.5">
@@ -1043,7 +1043,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-5.75rem)] w-full max-w-7xl flex-col overflow-hidden px-1 pt-1 sm:h-[calc(100vh-120px)] sm:px-6 lg:h-[calc(100vh-100px)] lg:px-10 lg:py-6">
+    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-100px)] lg:overflow-hidden lg:px-10 lg:py-6">
       <header className="shrink-0 space-y-1 border-b border-white/15 pb-2 sm:space-y-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1066,9 +1066,9 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
         </div>
       </header>
 
-      <form onSubmit={handleSave} className="flex-1 flex flex-col gap-4 overflow-y-auto pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 lg:grid lg:grid-cols-12 lg:gap-8 lg:overflow-hidden lg:pr-0">
-        <div className="lg:col-span-6 flex min-h-0 flex-col">
-          <Card className="flex min-h-[min(520px,62dvh)] flex-col p-4 sm:p-5 lg:min-h-0 lg:flex-1 lg:p-6 overflow-hidden" style={SETTINGS_CARD_THEMES.activeModel}>
+      <form onSubmit={handleSave} className="flex-1 flex flex-col gap-4 pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 lg:grid lg:grid-cols-12 lg:gap-8 lg:overflow-hidden lg:pr-0">
+                <div className="lg:col-span-6 flex min-h-0 flex-col lg:h-full">
+          <Card className="flex flex-col min-h-0 lg:h-full p-4 sm:p-5 lg:p-6 lg:overflow-hidden h-auto" style={SETTINGS_CARD_THEMES.activeModel}>
             <div className="flex items-center justify-between mb-4 shrink-0 sm:mb-5">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
                 <Globe className="text-white/80" size={20} />
@@ -1076,7 +1076,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
               </h2>
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden max-sm:flex-none">
+            <div className="flex-1 flex flex-col min-h-0 lg:overflow-hidden max-lg:flex-none">
               {/* Fixed top: Popular Providers */}
               <div className="shrink-0 space-y-2 pb-3">
                 <div className="flex items-center justify-between mb-2">
@@ -1100,14 +1100,14 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                 </button>
               </div>
 
-              {/* Scrollable: Custom Provider cards */}
-              <div className="relative flex-1 min-h-0 mt-3">
+              {/* Scrollable container displaying exactly one custom provider before scrolling */}
+              <div className="relative mt-3">
                 <div
                   ref={providerListRef}
                   onScroll={updateProviderScrollState}
-                  className="absolute inset-0 overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
+                  className="max-h-[170px] lg:max-h-[340px] overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-2 custom-scrollbar"
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4">
                     {renderProviderGrid(customProviders, 'No custom provider configured')}
                   </div>
                 </div>
@@ -1136,9 +1136,9 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
       <AnimatePresence>
         {isAddModalOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6" style={SETTINGS_CARD_THEMES.addProvider}>
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.addProvider}>
               <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(56,189,248,0.20) 0%, rgba(255,255,255,0.05) 34%, rgba(255,255,255,0) 64%)' }} />
-              <div className="relative z-10 flex items-center justify-between gap-4 border-b border-white/15 pb-4">
+              <div className="relative z-10 flex items-center justify-between gap-4 shrink-0 border-b border-white/15 pb-4">
                 <div>
                   <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-sky-100">Provider Setup</p>
                   <h2 className="mt-1 text-xl font-extrabold text-white">Add New Provider</h2>
@@ -1147,18 +1147,20 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                   <XCircle size={18} />
                 </button>
               </div>
-              <div className="relative z-10 space-y-4 rounded-2xl border border-white/15 bg-slate-950/20 p-4">
-                <div className="space-y-2">
-                  <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} placeholder="e.g. Local LLaMA" className="break-words" />
-                </div>
-                <div className="space-y-2">
-                  <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} placeholder="https://..." className="break-all" />
-                </div>
-                <div className="space-y-2">
-                  <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} placeholder="sk-..." className="break-all" />
+              <div className="relative z-10 space-y-4 overflow-y-auto custom-scrollbar pr-1 flex-1 min-h-0">
+                <div className="space-y-4 rounded-2xl border border-white/15 bg-slate-950/20 p-4">
+                  <div className="space-y-2">
+                    <Input label="Name" value={newProviderForm.name} onChange={e => setNewProviderForm({ ...newProviderForm, name: e.target.value })} placeholder="e.g. Local LLaMA" className="break-words" />
+                  </div>
+                  <div className="space-y-2">
+                    <Input label="Base URL" value={newProviderForm.baseUrl} onChange={e => setNewProviderForm({ ...newProviderForm, baseUrl: e.target.value })} placeholder="https://..." className="break-all" />
+                  </div>
+                  <div className="space-y-2">
+                    <Input label="API Key" type="password" value={newProviderForm.apiKey} onChange={e => setNewProviderForm({ ...newProviderForm, apiKey: e.target.value })} placeholder="sk-..." className="break-all" />
+                  </div>
                 </div>
               </div>
-              <div className="relative z-10 flex gap-3 pt-2 border-t border-white/15">
+              <div className="relative z-10 flex gap-3 shrink-0 pt-4 border-t border-white/15">
                 <button type="button" onClick={() => setIsAddModalOpen(false)} className={`flex-1 ${SECONDARY_BUTTON} cursor-pointer`}>Cancel</button>
                 <button type="button" onClick={handleAddProvider} className={`flex-1 ${PRIMARY_BUTTON} cursor-pointer`}>Add Provider</button>
               </div>
@@ -1255,54 +1257,56 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                   {/* Add Model Dropdown */}
                   <div className="relative z-50 shrink-0 rounded-2xl border border-cyan-200/20 bg-slate-950/25 p-3" ref={modelDropdownRef}>
                     <label className={`${SETTINGS_LABEL} block mb-2`}>Add Model Route</label>
-                    <input
-                      type="text"
-                      value={isModelDropdownOpen ? modelSearchQuery : ''}
-                      onChange={(e) => {
-                        setModelSearchQuery(e.target.value);
-                        if (!isModelDropdownOpen) setIsModelDropdownOpen(true);
-                      }}
-                      onFocus={() => {
-                        setIsModelDropdownOpen(true);
-                        setModelSearchQuery('');
-                      }}
-                      placeholder="Select or search a model..."
-                      className={`${FIELD_CLASS} rounded-lg px-3 py-2 text-[11px] font-mono placeholder:text-white/68`}
-                    />
-                    <div className="absolute right-6 top-[42px] pointer-events-none text-cyan-100">
-                      <ChevronDown size={14} />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={isModelDropdownOpen ? modelSearchQuery : ''}
+                        onChange={(e) => {
+                          setModelSearchQuery(e.target.value);
+                          if (!isModelDropdownOpen) setIsModelDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          setIsModelDropdownOpen(true);
+                          setModelSearchQuery('');
+                        }}
+                        placeholder="Select or search a model..."
+                        className={`${FIELD_CLASS} rounded-lg px-3 py-2 text-[11px] font-mono placeholder:text-white/68`}
+                      />
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-100">
+                        <ChevronDown size={14} />
+                      </div>
+                      <AnimatePresence>
+                        {isModelDropdownOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -5 }}
+                            className="absolute left-0 right-0 top-full z-[100] mt-1 max-h-48 overflow-y-auto rounded-xl border border-cyan-200/35 p-1.5 shadow-[0_18px_44px_rgba(8,47,73,0.42)] custom-scrollbar"
+                            style={{ background: 'linear-gradient(135deg, rgba(8,47,73,0.98) 0%, rgba(13,78,83,0.98) 52%, rgba(15,23,42,0.98) 100%)' }}
+                          >
+                            {availableModels
+                              .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                              .map((m) => (
+                                <div
+                                  key={m.id}
+                                  onClick={() => {
+                                    updateModelRouteProvider(m.id, provider.id);
+                                    setIsModelDropdownOpen(false);
+                                    setModelSearchQuery('');
+                                  }}
+                                  className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left font-mono text-[11px] font-semibold text-white hover:bg-cyan-100/14 cursor-pointer transition-colors"
+                                >
+                                  <span className="truncate">{m.name || m.id}</span>
+                                  <span className="truncate text-[10px] text-cyan-100/78">{m.id}</span>
+                                </div>
+                              ))}
+                            {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
+                              <div className="px-3 py-4 text-center font-mono text-[11px] font-semibold text-cyan-50/82">No models found</div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-                    <AnimatePresence>
-                      {isModelDropdownOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -5 }}
-                          className="relative z-[100] mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-cyan-200/35 p-1.5 shadow-[0_18px_44px_rgba(8,47,73,0.42)] custom-scrollbar"
-                          style={{ background: 'linear-gradient(135deg, rgba(8,47,73,0.98) 0%, rgba(13,78,83,0.98) 52%, rgba(15,23,42,0.98) 100%)' }}
-                        >
-                          {availableModels
-                            .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
-                            .map((m) => (
-                              <div
-                                key={m.id}
-                                onClick={() => {
-                                  updateModelRouteProvider(m.id, provider.id);
-                                  setIsModelDropdownOpen(false);
-                                  setModelSearchQuery('');
-                                }}
-                                className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left font-mono text-[11px] font-semibold text-white hover:bg-cyan-100/14 cursor-pointer transition-colors"
-                              >
-                                <span className="truncate">{m.name || m.id}</span>
-                                <span className="truncate text-[10px] text-cyan-100/78">{m.id}</span>
-                              </div>
-                            ))}
-                          {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
-                            <div className="px-3 py-4 text-center font-mono text-[11px] font-semibold text-cyan-50/82">No models found</div>
-                          )}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
                   </div>
 
                   {/* Existing Routes List */}

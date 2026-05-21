@@ -89,7 +89,7 @@ function Home() {
           </div>
 
           <motion.div variants={fadeUp} className="relative z-10 max-w-3xl">
-            <h1 className="max-w-3xl font-['Sora'] text-5xl font-black leading-[1.02] text-white sm:text-6xl lg:text-7xl" style={{ letterSpacing: 0 }}>
+            <h1 className="max-w-3xl font-['Sora'] text-3xl sm:text-5xl md:text-6xl lg:text-7xl" style={{ letterSpacing: 0 }}>
               Route every model request through one sharp local bridge.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
@@ -123,14 +123,14 @@ function Home() {
           <motion.div variants={fadeUp} className="relative z-10 mt-12 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
             <motion.div
               variants={fadeUp}
-              className="rounded-xl border border-white/12 bg-white/[0.055] p-5 shadow-2xl backdrop-blur-xl sm:p-6 transition-shadow duration-500 hover:shadow-[0_0_40px_-8px_rgba(99,102,241,0.2)]"
+              className="rounded-xl border border-white/12 bg-white/[0.055] p-4 shadow-2xl backdrop-blur-xl sm:p-6 transition-shadow duration-500 hover:shadow-[0_0_40px_-8px_rgba(99,102,241,0.2)]"
             >
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+                <div className="min-w-0">
                   <p className="text-xs font-bold uppercase text-slate-400">Routing Deck</p>
-                  <p className="mt-1 font-['Sora'] text-xl font-black text-white" style={{ letterSpacing: 0 }}>https://ai-bridge-zag2.onrender.com/v1</p>
+                  <p className="mt-1 font-['Sora'] text-sm sm:text-lg md:text-xl font-black text-white break-all" style={{ letterSpacing: 0 }}>https://ai-bridge-zag2.onrender.com/v1</p>
                 </div>
-                <span className="rounded-lg bg-indigo-300/15 px-3 py-1.5 text-xs font-black text-indigo-100 animate-pulse">online</span>
+                <span className="rounded-lg bg-indigo-300/15 px-3 py-1.5 text-xs font-black text-indigo-100 animate-pulse self-start sm:self-auto shrink-0">online</span>
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 {pipeline.map((step, idx) => {
@@ -138,6 +138,7 @@ function Home() {
                   return (
                     <div key={step.label} className="relative rounded-lg border border-white/10 bg-slate-950/40 p-4 transition-colors duration-300 hover:border-indigo-400/20">
                       {idx < pipeline.length - 1 && <div className="absolute right-[-18px] top-1/2 hidden h-px w-8 bg-indigo-300/45 sm:block" />}
+                      {idx < pipeline.length - 1 && <div className="absolute bottom-[-12px] left-[26px] h-3 w-px bg-indigo-300/45 sm:hidden" />}
                       <Icon size={20} className="text-indigo-200" />
                       <p className="mt-4 text-sm font-black text-white">{step.label}</p>
                       <p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p>
@@ -147,10 +148,10 @@ function Home() {
               </div>
               <div className="mt-5 space-y-2">
                 {consoleRows.map((row) => (
-                  <div key={`${row.method}-${row.model}`} className="grid grid-cols-[56px_minmax(0,1fr)_64px_48px] items-center gap-3 rounded-lg border border-white/8 bg-black/24 px-3 py-3 text-xs transition-colors duration-300 hover:border-white/14">
+                  <div key={`${row.method}-${row.model}`} className="grid grid-cols-[44px_minmax(0,1fr)_auto_32px] sm:grid-cols-[56px_minmax(0,1fr)_64px_48px] items-center gap-2 sm:gap-3 rounded-lg border border-white/8 bg-black/24 px-2.5 py-2.5 sm:px-3 sm:py-3 text-xs transition-colors duration-300 hover:border-white/14">
                     <span className="font-mono font-bold text-slate-400">{row.method}</span>
                     <span className="truncate font-mono text-slate-200">{row.model}</span>
-                    <span className="font-mono text-slate-400">{row.ms}</span>
+                    <span className="font-mono text-slate-400 text-[10px] sm:text-xs">{row.ms}</span>
                     <span className={`text-right font-mono font-black ${row.tone === 'indigo' ? 'text-indigo-300' : row.tone === 'cyan' ? 'text-cyan-300' : 'text-rose-300'}`}>{row.status}</span>
                   </div>
                 ))}
@@ -162,7 +163,7 @@ function Home() {
                 <motion.div
                   key={stat.label}
                   variants={fadeUp}
-                  className="rounded-lg border border-white/12 bg-white/[0.045] p-5 backdrop-blur transition-all duration-300 hover:border-indigo-400/20 hover:bg-white/[0.06]"
+                  className="rounded-lg border border-white/12 bg-white/[0.045] p-4 sm:p-5 backdrop-blur transition-all duration-300 hover:border-indigo-400/20 hover:bg-white/[0.06]"
                 >
                   <p className="font-['Sora'] text-3xl font-black text-white" style={{ letterSpacing: 0 }}>{stat.value}</p>
                   <p className="mt-2 text-sm font-semibold text-slate-400">{stat.label}</p>
