@@ -3,7 +3,7 @@ services:
     name: ai-bridge
     runtime: node
     plan: free
-    buildCommand: npm install && npm install --prefix apps/client && npm run build
+    buildCommand: npm install && npm install --include=dev --prefix apps/client && npm run build
     startCommand: npm start
     healthCheckPath: /health
     envVars:
