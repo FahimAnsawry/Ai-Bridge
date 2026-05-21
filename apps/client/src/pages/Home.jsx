@@ -128,7 +128,7 @@ function Home() {
               <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
                 <div>
                   <p className="text-xs font-bold uppercase text-slate-400">Routing Deck</p>
-                  <p className="mt-1 font-['Sora'] text-xl font-black text-white" style={{ letterSpacing: 0 }}>localhost:3000/v1</p>
+                  <p className="mt-1 font-['Sora'] text-xl font-black text-white" style={{ letterSpacing: 0 }}>https://ai-bridge-zag2.onrender.com/v1</p>
                 </div>
                 <span className="rounded-lg bg-indigo-300/15 px-3 py-1.5 text-xs font-black text-indigo-100 animate-pulse">online</span>
               </div>

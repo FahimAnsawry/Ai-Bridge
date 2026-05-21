@@ -22,7 +22,7 @@ const sections = [
     dotClass: 'bg-cyan-300',
     body: 'Run the backend proxy and the Vite dashboard together from the project root.',
     code: 'npm run dev',
-    notes: ['Proxy endpoint: http://localhost:3000/v1', 'Dashboard: http://localhost:5174', 'Dashboard API: http://localhost:3000/api'],
+    notes: ['Proxy endpoint: https://ai-bridge-zag2.onrender.com/v1', 'Dashboard: http://localhost:5174', 'Dashboard API: http://localhost:3000/api'],
   },
   {
     icon: KeyRound,
@@ -31,7 +31,7 @@ const sections = [
     iconClass: 'bg-emerald-300 text-slate-950',
     dotClass: 'bg-emerald-300',
     body: 'Log in with Google, go to Settings, and grab your base URL and API key from API config.',
-    code: 'Base URL: http://localhost:3000/v1\nAPI key: <your Bridge access key>',
+    code: 'Base URL: https://ai-bridge-zag2.onrender.com/v1\nAPI key: <your Bridge access key>',
     notes: ['Use the Bridge key in Claude CLI, not the upstream provider key.', 'Provider keys stay server-side in Settings.'],
   },
   {
@@ -125,11 +125,11 @@ function Docs() {
               </div>
 
               <CodeBlock>{`# macOS / Linux / Git Bash
-export ANTHROPIC_BASE_URL="http://localhost:3000/v1"
+export ANTHROPIC_BASE_URL="https://ai-bridge-zag2.onrender.com/v1"
 export ANTHROPIC_AUTH_TOKEN="<your Bridge access key>"
 
 # Windows PowerShell
-$env:ANTHROPIC_BASE_URL="http://localhost:3000/v1"
+$env:ANTHROPIC_BASE_URL="https://ai-bridge-zag2.onrender.com/v1"
 $env:ANTHROPIC_AUTH_TOKEN="<your Bridge access key>"`}</CodeBlock>
 
               <div className="mt-5 grid gap-3">

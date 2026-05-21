@@ -942,7 +942,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
     return counts;
   }, [form.model_routing, form.providers]);
 
-  const gatewayBaseUrl = 'http://localhost:3000/v1';
+  const gatewayBaseUrl = 'https://ai-bridge-zag2.onrender.com/v1';
   const currentAccessKey = initialUser?.accessKey || form.local_api_key || '';
 
   const renderProviderList = (providers, emptyLabel) => {
