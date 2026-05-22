@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2, Sparkles, Compass, Cpu, Zap, Network, Edit } from 'lucide-react';
+import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2, Sparkles, Compass, Cpu, Zap, Network, Edit, Brain, Wand2, Orbit, Bot, Atom, Database, Layers, Terminal, Server, Activity, Workflow, Infinity } from 'lucide-react';
 import {
   fetchConfig,
   saveConfig,
@@ -447,37 +447,109 @@ const mapConfigToForm = (cfg = {}, accessKey = '') => ({
   response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
 });
 
+const hashCode = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash);
+};
+
 const getProviderBadge = (name) => {
   const lowercaseName = (name || '').toLowerCase();
-  let gradient = 'from-indigo-500/12 to-purple-500/12 border-indigo-500/20';
-  let icon = <Globe size={15} className="text-indigo-300/80" />;
   
   if (lowercaseName.includes('openai')) {
-    gradient = 'from-emerald-500/12 to-teal-500/12 border-emerald-500/20';
-    icon = <Cpu size={15} className="text-emerald-300/80" />;
-  } else if (lowercaseName.includes('anthropic') || lowercaseName.includes('claude')) {
-    gradient = 'from-amber-500/12 to-orange-500/12 border-amber-500/20';
-    icon = <Sparkles size={15} className="text-amber-300/80" />;
-  } else if (lowercaseName.includes('gemini') || lowercaseName.includes('google')) {
-    gradient = 'from-blue-500/12 to-cyan-500/12 border-blue-500/20';
-    icon = <Sparkles size={15} className="text-blue-300/80" />;
-  } else if (lowercaseName.includes('deepseek')) {
-    gradient = 'from-cyan-500/12 to-blue-500/12 border-cyan-500/20';
-    icon = <Compass size={15} className="text-cyan-300/80" />;
-  } else if (lowercaseName.includes('groq')) {
-    gradient = 'from-orange-500/12 to-red-500/12 border-orange-500/20';
-    icon = <Zap size={15} className="text-orange-300/80" />;
-  } else if (lowercaseName.includes('openrouter')) {
-    gradient = 'from-purple-500/12 to-pink-500/12 border-purple-500/20';
-    icon = <Network size={15} className="text-purple-300/80" />;
-  } else if (lowercaseName.includes('github') || lowercaseName.includes('copilot')) {
-    gradient = 'from-slate-500/12 to-slate-700/12 border-slate-500/20';
-    icon = <GitBranch size={15} className="text-slate-300/80" />;
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-emerald-500/12 to-teal-500/12 border-emerald-500/20">
+        <Brain size={15} className="text-emerald-300/80" />
+      </div>
+    );
   }
-  
+  if (lowercaseName.includes('anthropic') || lowercaseName.includes('claude')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-amber-500/12 to-orange-500/12 border-amber-500/20">
+        <Wand2 size={15} className="text-amber-300/80" />
+      </div>
+    );
+  }
+  if (lowercaseName.includes('gemini') || lowercaseName.includes('google')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-blue-500/12 to-cyan-500/12 border-blue-500/20">
+        <Orbit size={15} className="text-blue-300/80" />
+      </div>
+    );
+  }
+  if (lowercaseName.includes('deepseek')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-cyan-500/12 to-blue-500/12 border-cyan-500/20">
+        <Compass size={15} className="text-cyan-300/80" />
+      </div>
+    );
+  }
+  if (lowercaseName.includes('groq')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-orange-500/12 to-red-500/12 border-orange-500/20">
+        <Zap size={15} className="text-orange-300/80" />
+      </div>
+    );
+  }
+  if (lowercaseName.includes('openrouter')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-purple-500/12 to-pink-500/12 border-purple-500/20">
+        <Network size={15} className="text-purple-300/80" />
+      </div>
+    );
+  }
+  if (lowercaseName.includes('github') || lowercaseName.includes('copilot')) {
+    return (
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br from-slate-500/12 to-slate-700/12 border-slate-500/20">
+        <Bot size={15} className="text-slate-300/80" />
+      </div>
+    );
+  }
+
+  // Futuristic presets for custom/other providers
+  const customPresets = [
+    {
+      gradient: 'from-fuchsia-500/12 to-purple-500/12 border-fuchsia-500/20',
+      icon: <Atom size={15} className="text-fuchsia-300/80" />
+    },
+    {
+      gradient: 'from-cyan-500/12 to-blue-500/12 border-cyan-500/20',
+      icon: <Database size={15} className="text-cyan-300/80" />
+    },
+    {
+      gradient: 'from-pink-500/12 to-rose-500/12 border-pink-500/20',
+      icon: <Layers size={15} className="text-pink-300/80" />
+    },
+    {
+      gradient: 'from-emerald-500/12 to-green-500/12 border-emerald-500/20',
+      icon: <Terminal size={15} className="text-emerald-300/80" />
+    },
+    {
+      gradient: 'from-rose-500/12 to-red-500/12 border-rose-500/20',
+      icon: <Server size={15} className="text-rose-300/80" />
+    },
+    {
+      gradient: 'from-teal-500/12 to-emerald-500/12 border-teal-500/20',
+      icon: <Activity size={15} className="text-teal-300/80" />
+    },
+    {
+      gradient: 'from-indigo-500/12 to-blue-500/12 border-indigo-500/20',
+      icon: <Workflow size={15} className="text-indigo-300/80" />
+    },
+    {
+      gradient: 'from-violet-500/12 to-purple-500/12 border-violet-500/20',
+      icon: <Infinity size={15} className="text-violet-300/80" />
+    }
+  ];
+
+  const index = hashCode(name || 'custom') % customPresets.length;
+  const preset = customPresets[index];
+
   return (
-    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br ${gradient}`}>
-      {icon}
+    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br ${preset.gradient}`}>
+      {preset.icon}
     </div>
   );
 };
