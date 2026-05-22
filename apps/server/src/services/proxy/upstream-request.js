@@ -53,8 +53,8 @@ function buildUpstreamRequest(req, baseUrl, apiKey) {
   // Bypassing AgentRouter 'unauthorized client' detection.
   if (baseUrl.includes('agentrouter')) {
     headers['originator'] = 'codex_cli_rs';
-    headers['version'] = '0.101.0';
-    headers['user-agent'] = 'codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464';
+    headers['version'] = '0.107.0';
+    headers['user-agent'] = 'codex_cli_rs/0.107.0';
   }
 
   const isGitHubModels = baseUrl.includes('models.github.ai') || baseUrl.includes('models.inference.ai.azure.com') || (baseUrl.includes('api.github.com') && req.path.includes('/models'));

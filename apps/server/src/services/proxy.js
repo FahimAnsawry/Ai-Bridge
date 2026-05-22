@@ -1114,6 +1114,44 @@ async function proxyRequest(req, res) {
             );
           }
 
+          // WAF / non-JSON failover: if the upstream returned an HTML anti-bot
+          // challenge (Aliyun WAF, Cloudflare, etc.) try keyrotation then
+          // provider auto-switch before giving up with a 502.
+          if (!parsed && !res.headersSent) {
+            const rawSnippetForFailover = String(rawBody || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+            const isWafBlock = /^\s*<(!doctype|html|meta|head)|aliyun_waf|cloudflare|attention required|just a moment/i.test(rawSnippetForFailover);
+            if (isWafBlock && canRetry(req)) {
+              console.warn(`[proxy] WAF/HTML body from ${providerName} (HTTP ${upstreamRes.status}); attempting failover.`);
+              // 1. Try same-provider key rotation
+              const syntheticErr = { response: { status: upstreamRes.status, data: { error: { message: rawSnippetForFailover, code: 'non_json_upstream' } } } };
+              const keyResult = await retryWithNextProviderApiKey(req, res, currentProvider, apiKey, {
+                status: upstreamRes.status,
+                message: 'Upstream WAF / non-JSON body',
+                rawUpstreamMessage: rawSnippetForFailover,
+                upstreamErrorCode: 'non_json_upstream',
+                err: syntheticErr,
+              });
+              if (keyResult) return keyResult;
+
+              // 2. Try next provider (route-aware or global)
+              if (!req.__triedProviders) req.__triedProviders = new Set();
+              if (currentProvider?.id) req.__triedProviders.add(currentProvider.id);
+              const wafNextProvider = req.__modelRoute && !req.__modelRoute.legacyFixed
+                ? getNextRouteProvider(req, currentProvider?.id)
+                : eligibleProviders.find((p) => {
+                    const hasBaseUrl = typeof p.baseUrl === 'string' && p.baseUrl.trim().length > 0;
+                    const hasKey = p.apiKey || (p.apiKeys && p.apiKeys.length > 0);
+                    return hasBaseUrl && hasKey && p.id !== currentProvider?.id && !req.__triedProviders.has(p.id);
+                  });
+              if (wafNextProvider) {
+                console.warn(`[proxy] WAF block on ${providerName}; auto-switching to ${wafNextProvider.name || wafNextProvider.id}${attemptLabel(req)}`);
+                switchToFallbackProvider(req, wafNextProvider.id);
+                return proxyRequest(req, res);
+              }
+              console.warn(`[proxy] WAF block on ${providerName}; no fallback provider available.`);
+            }
+          }
+
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             captureUsage(parsed);
             if (Array.isArray(parsed.choices)) {
