@@ -113,7 +113,15 @@ const Sidebar = () => {
         </motion.nav>
 
         <div className="relative z-10 flex w-full shrink-0 justify-center pb-[28px] pt-4">
-          <a href="/auth/logout" aria-label="Logout" title="Logout" className="block">
+          <a
+            href="/auth/logout"
+            aria-label="Logout"
+            title="Logout"
+            className="block"
+            onClick={() => {
+              localStorage.removeItem('auth_verified');
+            }}
+          >
             <div
               className="flex h-11 w-11 items-center justify-center rounded-[10px]"
               style={{ color: 'rgba(222,228,255,0.66)' }}

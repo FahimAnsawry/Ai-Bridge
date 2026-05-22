@@ -94,6 +94,11 @@ function AppContent() {
   const isDashboardPage = location.pathname === '/dashboard';
 
   const [hasSessionHint, setHasSessionHint] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('logout') === 'success') {
+      localStorage.removeItem('auth_verified');
+      return false;
+    }
     return localStorage.getItem('auth_verified') === 'true';
   });
 

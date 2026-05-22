@@ -159,6 +159,11 @@ const BottomNav = () => {
                     aria-label={item.name}
                     className={baseRow}
                     style={{ ...rowStyle, border: '1px solid transparent' }}
+                    onClick={() => {
+                      if (item.href === '/auth/logout') {
+                        localStorage.removeItem('auth_verified');
+                      }
+                    }}
                   >
                     <Icon size={20} strokeWidth={1.7} />
                     <span className="text-[14px] font-medium">{item.name}</span>
