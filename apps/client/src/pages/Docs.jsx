@@ -55,7 +55,7 @@ function Docs({ user }) {
       >
         <motion.header variants={fadeUp} className="max-w-3xl">
           <h1
-            className="text-3xl font-black tracking-tight text-white sm:text-4xl md:text-5xl"
+            className="text-2xl font-black tracking-tight text-white sm:text-3xl md:text-4xl"
           >
             Use AI Proxy Bridge with Claude CLI
           </h1>
