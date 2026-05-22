@@ -72,7 +72,7 @@ const CopilotCardSkeleton = () => (
 
 const SettingsSkeleton = () => {
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-100px)] lg:overflow-hidden lg:px-10 lg:py-6">
+    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 md:h-[calc(100vh-100px)] md:overflow-hidden md:px-8 lg:px-10 md:py-4 lg:py-6">
       <header className="shrink-0 space-y-1 sm:space-y-2 pb-1 sm:pb-2 border-b border-white/15">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
@@ -82,9 +82,9 @@ const SettingsSkeleton = () => {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col gap-4 pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 lg:grid lg:grid-cols-12 lg:gap-8 lg:overflow-hidden lg:pr-0">
-        <div className="lg:col-span-6 flex min-h-0 flex-col">
-          <div className="relative rounded-2xl p-4 sm:p-5 lg:p-6 lg:h-full flex flex-col min-h-0 lg:overflow-hidden h-auto" style={CARD_THEMES.activeModel}>
+      <div className="flex-1 flex flex-col gap-4 pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 md:grid md:grid-cols-12 md:gap-6 lg:gap-8 md:overflow-hidden lg:pr-0">
+        <div className="md:col-span-6 flex min-h-0 flex-col">
+          <div className="relative rounded-2xl p-4 sm:p-5 lg:p-6 md:h-full flex flex-col min-h-0 md:overflow-hidden h-auto" style={CARD_THEMES.activeModel}>
             <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 55%)' }} />
             <div className="relative z-10 flex-1 flex flex-col min-h-0">
               <div className="flex items-center justify-between mb-5 shrink-0">
@@ -94,7 +94,7 @@ const SettingsSkeleton = () => {
                 </div>
               </div>
 
-              <div className="flex-1 flex flex-col min-h-0 lg:overflow-hidden max-lg:flex-none space-y-4">
+              <div className="flex-1 flex flex-col min-h-0 md:overflow-hidden max-md:flex-none space-y-4">
                 <div className="shrink-0 space-y-3">
                   <SkeletonPulse className="h-3 w-40" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -110,7 +110,7 @@ const SettingsSkeleton = () => {
                 </div>
 
                 <div className="relative mt-3">
-                  <div className="max-h-[170px] overflow-y-auto pr-1 pb-2 custom-scrollbar w-full">
+                  <div className="max-h-[170px] md:max-h-[340px] overflow-y-auto pr-1 pb-2 custom-scrollbar w-full">
                     <div className="grid grid-cols-1 gap-4">
                       <ProviderCardSkeleton />
                       <ProviderCardSkeleton />
@@ -122,44 +122,45 @@ const SettingsSkeleton = () => {
           </div>
         </div>
 
-        <div className="lg:col-span-6 flex min-h-0 flex-col space-y-4 sm:space-y-6 lg:overflow-hidden">
-          <div className="relative rounded-2xl p-4 sm:p-5 lg:p-6 lg:h-full flex flex-col min-h-0 lg:overflow-hidden h-auto" style={CARD_THEMES.todayTokens}>
+        <div className="md:col-span-6 flex min-h-0 flex-col space-y-4 sm:space-y-6 md:overflow-hidden">
+          <div className="relative rounded-2xl p-4 sm:p-5 lg:p-6 md:h-full flex flex-col min-h-0 md:overflow-hidden h-auto" style={CARD_THEMES.todayTokens}>
             <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 55%)' }} />
             <div className="relative z-10 flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between gap-3 shrink-0">
-                <div className="flex items-center gap-3">
-                  <SkeletonPulse className="w-5 h-5 rounded" />
-                  <SkeletonPulse className="h-5 w-28" />
+              <div className="shrink-0 flex items-start justify-between gap-4 border-b border-white/15 pb-4 sm:pb-5">
+                <div className="min-w-0 space-y-2">
+                  <SkeletonPulse className="h-3 w-28" />
+                  <SkeletonPulse className="h-5 w-48" />
+                  <SkeletonPulse className="h-3 w-64" />
                 </div>
-                <SkeletonPulse className="h-6 w-20 rounded-full" />
+                <SkeletonPulse className="h-6 w-20 rounded-full shrink-0" />
               </div>
 
-              <div className="mt-4 flex-1 min-h-0 lg:overflow-y-auto space-y-3 border-t border-white/15 pt-4 sm:mt-5 sm:space-y-4 sm:pt-5">
-                <div className="rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] p-3.5 sm:p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <SkeletonPulse className="h-9 w-9 rounded-xl shrink-0 sm:mt-0.5" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <SkeletonPulse className="h-3 w-20" />
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <SkeletonPulse className="h-10 w-full sm:flex-1 rounded-xl" />
-                        <SkeletonPulse className="h-10 w-full sm:w-10 rounded-xl" />
-                      </div>
-                    </div>
+              <div className="mt-4 flex-1 min-h-0 md:overflow-y-auto space-y-3 sm:mt-5 sm:space-y-4">
+                <div className="relative rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] p-3.5 sm:p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <SkeletonPulse className="h-3 w-24" />
+                    <SkeletonPulse className="h-4 w-32 rounded-full hidden sm:block" />
                   </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                    <SkeletonPulse className="h-10 w-full sm:flex-1 rounded-xl" />
+                    <SkeletonPulse className="h-10 w-full sm:w-11 rounded-xl" />
+                  </div>
+                  <SkeletonPulse className="h-2.5 w-44" />
                 </div>
 
-                <div className="rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] p-3.5 sm:p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <SkeletonPulse className="h-9 w-9 rounded-xl shrink-0 sm:mt-0.5" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <SkeletonPulse className="h-3 w-24" />
-                      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                        <SkeletonPulse className="col-span-2 h-10 rounded-xl sm:flex-1" />
-                        <SkeletonPulse className="h-10 w-full sm:w-10 rounded-xl" />
-                        <SkeletonPulse className="h-10 w-full sm:w-10 rounded-xl" />
-                      </div>
+                <div className="relative rounded-2xl border border-white/20 bg-slate-950/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] p-3.5 sm:p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <SkeletonPulse className="h-3 w-24" />
+                    <SkeletonPulse className="h-4 w-36 rounded-full hidden sm:block" />
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                    <SkeletonPulse className="h-10 w-full sm:flex-1 rounded-xl" />
+                    <div className="flex gap-2 sm:contents">
+                      <SkeletonPulse className="h-10 flex-1 sm:flex-none sm:w-11 rounded-xl" />
+                      <SkeletonPulse className="h-10 flex-1 sm:flex-none sm:w-11 rounded-xl" />
                     </div>
                   </div>
+                  <SkeletonPulse className="h-2.5 w-56" />
                 </div>
               </div>
             </div>

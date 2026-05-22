@@ -1,7 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env'), override: false });
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: false });
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 require('./config/console-timestamp'); // Patch console.* with ISO timestamps
 require('./config/db'); // Connect to MongoDB
 const express = require('express');

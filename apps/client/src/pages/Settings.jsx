@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2 } from 'lucide-react';
+import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2, Sparkles, Compass, Cpu, Zap, Network, Edit } from 'lucide-react';
 import {
   fetchConfig,
   saveConfig,
@@ -221,31 +221,35 @@ function CopilotAuthCard({
   );
 
   return (
-    <div className="relative overflow-hidden rounded-2xl p-4 space-y-3" style={GLASS_STYLE}>
-      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 55%)' }} />
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 p-4 transition-all duration-300 hover:border-white/20 hover:bg-slate-950/50 hover:shadow-[0_8px_30px_rgba(99,102,241,0.04)]">
+      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 60%)' }} />
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
         className="relative z-10 flex w-full items-center justify-between gap-3 text-left cursor-pointer"
       >
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-white/25 bg-slate-950/35">
-            <GitBranch size={16} className={isConnected ? 'text-emerald-200' : 'text-white/80'} />
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 shadow-[0_0_8px_rgba(99,102,241,0.08)]">
+            <GitBranch size={15} className={isConnected ? 'text-indigo-300' : 'text-white/70'} />
           </div>
           <div className="min-w-0">
-            <h3 className="truncate text-[13px] font-bold text-white">GitHub Copilot</h3>
-
+            <h3 className="truncate text-xs font-bold text-white tracking-tight">GitHub Copilot</h3>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-widest ${isConnected ? 'bg-emerald-500/20 text-emerald-100' : isAuthed ? 'bg-amber-500/20 text-amber-100' : 'bg-slate-950/35 text-white'
-            }`}>
-            {isConnected ? 'Connected' : isAuthed ? 'Authorized' : (<><XCircle size={10} /> Not Connected</>)}
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+            isConnected 
+              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.08)]' 
+              : isAuthed 
+                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' 
+                : 'bg-white/5 text-white/50 border border-white/10'
+          }`}>
+            {isConnected ? 'Connected' : isAuthed ? 'Authorized' : 'Not Connected'}
           </div>
           {isOpen ? (
-            <ChevronUp size={15} className="text-white/45" />
+            <ChevronUp size={14} className="text-white/40" />
           ) : (
-            <ChevronDown size={15} className="text-white/45" />
+            <ChevronDown size={14} className="text-white/40" />
           )}
         </div>
       </button>
@@ -258,91 +262,139 @@ function CopilotAuthCard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="relative z-10 overflow-hidden space-y-4"
+            className="relative z-10 overflow-hidden space-y-4 mt-3"
           >
             {/* Connected state */}
             {isConnected && (
-              <div className="space-y-3">
-                <div className={`${SOFT_PANEL} p-3 space-y-1.5`}>
-                  <p className="text-[10px] text-emerald-400 font-semibold">✓ Active Proxy Endpoints</p>
-                  <div className="space-y-1 font-mono text-[9px] text-white/82">
-                    <div className="flex items-center justify-between">
-                      <span>OpenAI format</span>
-                      <span className="text-white">/copilot/v1/chat/completions</span>
+              <div className="space-y-3.5">
+                <div className="rounded-xl border border-white/10 bg-slate-950/45 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Active Proxy Endpoints
+                    </p>
+                    {status?.tokenExpiry && (
+                      <span className="text-[9px] text-white/50">
+                        Expires: {new Date(status.tokenExpiry).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-slate-950/40 px-2.5 py-2">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <p className="text-[8px] font-extrabold uppercase tracking-wider text-white/40">OpenAI Format</p>
+                        <p className="font-mono text-[10px] text-white/80 truncate">/copilot/v1/chat/completions</p>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          navigator.clipboard.writeText('/copilot/v1/chat/completions');
+                          showToast('Endpoint path copied!', 'success');
+                        }}
+                        className="p-1.5 rounded hover:bg-white/5 text-white/40 hover:text-white transition-colors"
+                        title="Copy endpoint"
+                      >
+                        <Copy size={11} />
+                      </button>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span>Anthropic format</span>
-                      <span className="text-white">/copilot/v1/messages</span>
+
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-slate-950/40 px-2.5 py-2">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <p className="text-[8px] font-extrabold uppercase tracking-wider text-white/40">Anthropic Format</p>
+                        <p className="font-mono text-[10px] text-white/80 truncate">/copilot/v1/messages</p>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          navigator.clipboard.writeText('/copilot/v1/messages');
+                          showToast('Endpoint path copied!', 'success');
+                        }}
+                        className="p-1.5 rounded hover:bg-white/5 text-white/40 hover:text-white transition-colors"
+                        title="Copy endpoint"
+                      >
+                        <Copy size={11} />
+                      </button>
                     </div>
                   </div>
-                  {status?.tokenExpiry && (
-                    <p className="text-[9px] text-white/76 pt-0.5">
-                      Token expires: {new Date(status.tokenExpiry).toLocaleTimeString()}
-                      <span className="ml-1 text-white/68">(auto-refreshes)</span>
-                    </p>
-                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="flex items-center gap-1.5 text-[10px] text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
-                >
-                  <LogOut size={11} /> Disconnect
-                </button>
+                
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-[9px] text-white/40 font-medium">Automatic token refresh active</span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex items-center gap-1 text-[10px] text-rose-400 hover:text-rose-300 font-semibold transition-colors cursor-pointer"
+                  >
+                    <LogOut size={11} /> Disconnect
+                  </button>
+                </div>
               </div>
             )}
 
             {/* Not connected state */}
             {!isConnected && !flowState && (
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  id="copilot-device-flow-btn"
-                  onClick={startFlow}
-                  disabled={submitting}
-                  className={`${PRIMARY_BUTTON} cursor-pointer`}
-                >
-                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <GitBranch size={13} />}
-                  Connect
-                </button>
+              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3.5 flex flex-col gap-3">
+                <p className="text-[11px] text-white/70 leading-relaxed">
+                  Use your GitHub Copilot subscription as an LLM provider. Requests are proxied locally to your Copilot account.
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    id="copilot-device-flow-btn"
+                    onClick={startFlow}
+                    disabled={submitting}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 hover:border-indigo-500/50 text-[10px] font-bold uppercase tracking-wider text-indigo-200 px-4 py-2.5 cursor-pointer disabled:opacity-50 transition-all"
+                  >
+                    {submitting ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                    Connect Account
+                  </button>
+                </div>
               </div>
             )}
 
             {/* Active Device Flow polling state */}
             {flowState && (
               <div className="space-y-3">
-                <div className={`${SOFT_PANEL} p-4 space-y-3`}>
-                  <div className="flex items-center gap-2 text-indigo-300 text-[11px] font-semibold">
-                    <Loader2 size={12} className="animate-spin" />
-                    Waiting for authorization...
+                <div className="rounded-xl border border-indigo-500/20 bg-slate-950/40 p-4 space-y-4">
+                  <div className="flex items-center gap-2 text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
+                    <Loader2 size={12} className="animate-spin text-cyan-300" />
+                    Waiting for Authorization
                   </div>
-                  <div>
-                    <p className="text-[9px] text-white/82 uppercase tracking-widest mb-1.5">Enter this code on GitHub</p>
+                  <div className="space-y-1.5">
+                    <p className="text-[9px] text-white/55 uppercase tracking-widest">Verification Code</p>
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 rounded-lg border border-white/25 bg-slate-950/45 px-4 py-2.5 font-mono text-xl font-bold text-white tracking-[0.3em] text-center">
+                      <div className="flex-1 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2.5 font-mono text-xl font-extrabold text-white tracking-[0.25em] text-center shadow-[inset_0_1px_5px_rgba(0,0,0,0.3)]">
                         {flowState.userCode}
                       </div>
-                      <button type="button" onClick={copyCode} className={`${ICON_BUTTON} h-11 w-11 cursor-pointer`} title="Copy code">
+                      <button 
+                        type="button" 
+                        onClick={copyCode} 
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white cursor-pointer transition-colors"
+                        title="Copy code"
+                      >
                         <Copy size={14} />
                       </button>
                     </div>
                   </div>
+                  
                   <a
                     href={flowState.verificationUri}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-1.5 w-full py-2 border border-white/25 bg-slate-950/35 text-white text-[10px] font-bold rounded-lg hover:bg-slate-950/50"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-[10px] font-bold rounded-xl hover:bg-indigo-500/20 hover:text-white transition-all shadow-[0_2px_10px_-4px_rgba(99,102,241,0.2)]"
                   >
-                    <ExternalLink size={11} /> Open {flowState.verificationUri}
+                    <ExternalLink size={12} />
+                    Open GitHub Auth Portal
                   </a>
                 </div>
                 <div className="flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => { stopPolling(); setFlowState(null); }}
-                    className="text-[10px] text-white/76 hover:text-white transition-colors cursor-pointer"
+                    className="text-[10px] text-white/50 hover:text-white/80 transition-colors cursor-pointer"
                   >
-                    Cancel
+                    Cancel Connection
                   </button>
                 </div>
               </div>
@@ -370,60 +422,78 @@ const mapConfigToForm = (cfg = {}, accessKey = '') => ({
   response_cache_ttl_seconds: cfg.response_cache_ttl_seconds || 30,
 });
 
-// Memoized ProviderCard component to prevent unnecessary re-renders
-const ProviderCard = React.memo(({ provider, routedCount, keyCount, onEdit, onRoute, onRemove }) => {
+const getProviderBadge = (name) => {
+  const lowercaseName = (name || '').toLowerCase();
+  let gradient = 'from-indigo-500/12 to-purple-500/12 border-indigo-500/20';
+  let icon = <Globe size={15} className="text-indigo-300/80" />;
+  
+  if (lowercaseName.includes('openai')) {
+    gradient = 'from-emerald-500/12 to-teal-500/12 border-emerald-500/20';
+    icon = <Cpu size={15} className="text-emerald-300/80" />;
+  } else if (lowercaseName.includes('anthropic') || lowercaseName.includes('claude')) {
+    gradient = 'from-amber-500/12 to-orange-500/12 border-amber-500/20';
+    icon = <Sparkles size={15} className="text-amber-300/80" />;
+  } else if (lowercaseName.includes('gemini') || lowercaseName.includes('google')) {
+    gradient = 'from-blue-500/12 to-cyan-500/12 border-blue-500/20';
+    icon = <Sparkles size={15} className="text-blue-300/80" />;
+  } else if (lowercaseName.includes('deepseek')) {
+    gradient = 'from-cyan-500/12 to-blue-500/12 border-cyan-500/20';
+    icon = <Compass size={15} className="text-cyan-300/80" />;
+  } else if (lowercaseName.includes('groq')) {
+    gradient = 'from-orange-500/12 to-red-500/12 border-orange-500/20';
+    icon = <Zap size={15} className="text-orange-300/80" />;
+  } else if (lowercaseName.includes('openrouter')) {
+    gradient = 'from-purple-500/12 to-pink-500/12 border-purple-500/20';
+    icon = <Network size={15} className="text-purple-300/80" />;
+  } else if (lowercaseName.includes('github') || lowercaseName.includes('copilot')) {
+    gradient = 'from-slate-500/12 to-slate-700/12 border-slate-500/20';
+    icon = <GitBranch size={15} className="text-slate-300/80" />;
+  }
+  
   return (
-    <div className={`${SOFT_PANEL} group relative overflow-hidden p-3.5 sm:p-4 flex flex-col gap-3.5 sm:gap-4`}>
-      <div className="relative z-10 flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <h4 className="font-bold text-white tracking-tight text-sm break-words sm:truncate">{provider.name || 'Unnamed Provider'}</h4>
-          <p className="text-[10px] text-white/60 font-mono break-all mt-0.5 sm:truncate">{provider.baseUrl || 'No URL'}</p>
+    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border bg-gradient-to-br ${gradient}`}>
+      {icon}
+    </div>
+  );
+};
+
+// Memoized ProviderCard component to prevent unnecessary re-renders
+const ProviderCard = React.memo(({ provider, onEdit, onRoute, onRemove }) => {
+  return (
+    <div className="group relative rounded-sm border border-white/15 bg-slate-950/40 p-4 transition-colors duration-200 hover:border-white/35 hover:bg-slate-950/55 flex flex-col gap-3.5">
+      <div className="relative flex items-center gap-2.5">
+        <div className="relative shrink-0">
+          {getProviderBadge(provider.name)}
+        </div>
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <h4 className="font-bold text-white tracking-tight text-sm truncate leading-tight">{provider.name || 'Unnamed Provider'}</h4>
+          <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" title="Active" />
         </div>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRemove(provider.id); }}
-          className="p-2 shrink-0 rounded-lg text-rose-200/80 bg-rose-500/10 hover:text-rose-100 hover:bg-rose-500/20 transition-all cursor-pointer sm:opacity-0 sm:group-hover:opacity-100"
+          className="shrink-0 font-mono text-[12px] font-extrabold leading-none text-rose-300/70 hover:text-rose-200 transition-colors cursor-pointer sm:opacity-0 sm:group-hover:opacity-100"
+          title="Remove Provider"
         >
-          <Trash2 size={14} />
+          [&times;]
         </button>
       </div>
 
-      <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="inline-flex items-center gap-1 text-[10px] text-white/50">
-          <span className="w-1 h-1 rounded-full bg-emerald-400/60" />
-          Active
-        </span>
-        <span className="text-[10px] text-white/35">|</span>
-        <span className="text-[10px] text-white/50">
-          <span className="text-white/80 font-mono font-bold">{keyCount}</span> key{keyCount !== 1 ? 's' : ''}
-        </span>
-        <span className="text-[10px] text-white/35">|</span>
-        <span className="text-[10px] text-white/50">
-          <span className="text-white/80 font-mono font-bold">{routedCount}</span> route{routedCount !== 1 ? 's' : ''}
-        </span>
-      </div>
-
-      <div className="relative z-10 grid grid-cols-2 gap-2 sm:flex sm:items-center">
+      <div className="relative mt-auto grid grid-cols-2 overflow-hidden rounded-sm border border-white/20">
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(provider.id);
-          }}
-          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/25 bg-white/5 px-3 py-2.5 text-[11px] font-bold text-white hover:bg-white/10 hover:border-white/35 transition-all cursor-pointer sm:flex-1 sm:px-4"
+          onClick={(e) => { e.stopPropagation(); onEdit(provider.id); }}
+          className="inline-flex h-9 items-center justify-center gap-1.5 border-r border-white/20 bg-slate-950/35 font-mono text-[10px] font-extrabold uppercase tracking-[0.18em] text-white/85 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <Edit size={11} className="text-white/55" />
           Edit
         </button>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRoute(provider.id);
-          }}
-          className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2.5 text-[11px] font-bold text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/50 hover:text-cyan-100 transition-all cursor-pointer shadow-[0_0_20px_-6px_rgba(34,211,238,0.3)] hover:shadow-[0_0_28px_-4px_rgba(34,211,238,0.5)] sm:flex-1 sm:px-4"
+          onClick={(e) => { e.stopPropagation(); onRoute(provider.id); }}
+          className="inline-flex h-9 items-center justify-center gap-1.5 bg-cyan-950/30 font-mono text-[10px] font-extrabold uppercase tracking-[0.18em] text-cyan-100 hover:bg-cyan-900/45 hover:text-white transition-colors cursor-pointer"
         >
-          <Route size={13} />
+          <Route size={11} className="text-cyan-300" />
           Routes
         </button>
       </div>
@@ -475,85 +545,121 @@ const ApiConfigCard = ({ baseUrl, accessKey, onCopy }) => {
 
   return (
     <Card className="flex flex-col min-h-0 lg:h-full p-4 sm:p-5 lg:p-6 lg:overflow-hidden h-auto" style={SETTINGS_CARD_THEMES.todayTokens}>
-      <div className="flex items-center justify-between gap-3 shrink-0">
-        <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
-          <KeyRound className="text-white/80" size={20} />
-          API Config
-        </h2>
-        <span className={`text-[10px] font-bold uppercase tracking-[0.2em] px-2.5 py-1 rounded-full border ${
-          hasAccessKey
-            ? 'text-emerald-100 bg-slate-950/35 border-white/25'
-            : 'text-amber-100 bg-slate-950/35 border-white/25'
-        }`}>
-          {hasAccessKey ? 'Ready' : 'Missing Key'}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-4 -right-4 h-36 w-36 opacity-50"
+        style={{
+          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.18) 1px, transparent 1.2px)',
+          backgroundSize: '10px 10px',
+          WebkitMaskImage: 'radial-gradient(circle at top right, rgba(0,0,0,0.9), transparent 70%)',
+          maskImage: 'radial-gradient(circle at top right, rgba(0,0,0,0.9), transparent 70%)',
+        }}
+      />
+
+      <header className="shrink-0 flex items-start justify-between gap-4 border-b border-white/15 pb-4 sm:pb-5">
+        <div className="min-w-0 space-y-1.5">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.24em] text-emerald-200/85">
+            01 · Local Gateway
+          </p>
+          <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-white flex items-center gap-2.5">
+            <KeyRound className="text-emerald-200/90" size={20} />
+            Gateway Credentials
+          </h2>
+        </div>
+        <span
+          className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.2em] ${
+            hasAccessKey
+              ? 'text-emerald-100 bg-emerald-500/12 border-emerald-200/40'
+              : 'text-amber-100 bg-amber-500/12 border-amber-200/40'
+          }`}
+        >
+          {hasAccessKey ? (
+            <>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inset-0 animate-ping rounded-full bg-emerald-300/70" />
+                <span className="relative inline-block h-1.5 w-1.5 rounded-full bg-emerald-200" />
+              </span>
+              Live
+            </>
+          ) : (
+            <>
+              <span className="inline-block h-1.5 w-1.5 rounded-full border border-amber-200/80" />
+              Awaiting Key
+            </>
+          )}
         </span>
-      </div>
+      </header>
 
-      <div className="mt-4 flex-1 min-h-0 lg:overflow-y-auto custom-scrollbar space-y-3 border-t border-white/15 pt-4 sm:mt-5 sm:space-y-4 sm:pr-1 sm:pt-5">
-        <div className={`${SOFT_PANEL} p-3.5 sm:p-4`}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white sm:mt-0.5">
-              <Link2 size={16} />
+      <div className="mt-4 flex-1 min-h-0 lg:overflow-y-auto custom-scrollbar space-y-3 sm:mt-5 sm:space-y-4 sm:pr-1">
+        <section className={`${SOFT_PANEL} relative p-3.5 sm:p-4`}>
+          <span className="absolute right-3 top-3 font-mono text-[10px] font-bold tracking-[0.18em] text-white/35">
+            01
+          </span>
+          <div className="flex items-center gap-2 pr-7">
+            <span className={SETTINGS_LABEL}>Base URL</span>
+            <span className="hidden sm:inline-flex items-center rounded-full border border-emerald-200/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-emerald-100/90">
+              POST · /v1/messages
+            </span>
+          </div>
+          <div className="mt-1 mb-3 h-px w-full border-b border-dashed border-white/12" />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <div className="relative min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/55 px-3 py-2.5 font-mono text-[11px] font-semibold leading-5 text-white break-all sm:text-xs">
+              <Link2 size={12} className="absolute left-3 top-3 text-emerald-200/60" />
+              <span className="block pl-5">{baseUrl}</span>
             </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <label className={SETTINGS_LABEL}>Base URL</label>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-[11px] font-semibold leading-5 text-white break-all sm:text-xs">
-                  {baseUrl}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => copyValue('baseUrl', baseUrl)}
-                  className={`${ICON_BUTTON} w-full sm:w-10`}
-                  title="Copy base URL"
-                >
-                  {copiedField === 'baseUrl' ? <Check size={15} /> : <Copy size={15} />}
-                </button>
-              </div>
+            <button
+              type="button"
+              onClick={() => copyValue('baseUrl', baseUrl)}
+              className={`${ICON_BUTTON} w-full sm:w-11`}
+              title="Copy base URL"
+            >
+              {copiedField === 'baseUrl' ? <Check size={15} /> : <Copy size={15} />}
+            </button>
+          </div>
+        </section>
+
+        <section className={`${SOFT_PANEL} relative p-3.5 sm:p-4`}>
+          <span className="absolute right-3 top-3 font-mono text-[10px] font-bold tracking-[0.18em] text-white/35">
+            02
+          </span>
+          <div className="flex items-center gap-2 pr-7">
+            <span className={SETTINGS_LABEL}>Access Key</span>
+          </div>
+          <div className="mt-1 mb-3 h-px w-full border-b border-dashed border-white/12" />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <div className={`relative min-w-0 flex-1 rounded-xl border border-white/25 bg-slate-950/55 px-3 py-2.5 font-mono text-[11px] leading-5 break-all sm:text-xs ${hasAccessKey ? 'font-semibold text-white' : 'font-semibold text-white/70'}`}>
+              <KeyRound size={12} className="absolute left-3 top-3 text-cyan-200/60" />
+              <span className="block pl-5">
+                {hasAccessKey ? (isKeyVisible ? accessKey : '••••••••••••••••••••••••') : 'No access key available'}
+              </span>
+            </div>
+            <div className="flex gap-2 sm:contents">
+              <button
+                type="button"
+                onClick={() => setIsKeyVisible((value) => !value)}
+                disabled={!hasAccessKey}
+                className={`${ICON_BUTTON} flex-1 sm:flex-none sm:w-11`}
+                title={isKeyVisible ? 'Hide access key' : 'Show access key'}
+              >
+                {isKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => copyValue('accessKey', accessKey)}
+                disabled={!hasAccessKey}
+                className={`${ICON_BUTTON} flex-1 sm:flex-none sm:w-11`}
+                title="Copy access key"
+              >
+                {copiedField === 'accessKey' ? <Check size={15} /> : <Copy size={15} />}
+              </button>
             </div>
           </div>
-        </div>
-
-        <div className={`${SOFT_PANEL} p-3.5 sm:p-4`}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-slate-950/35 text-white sm:mt-0.5">
-              <KeyRound size={16} />
-            </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <label className={SETTINGS_LABEL}>Access Key</label>
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                <div className={`col-span-2 min-w-0 rounded-xl border border-white/25 bg-slate-950/45 px-3 py-2.5 font-mono text-[11px] leading-5 break-all sm:flex-1 sm:text-xs ${hasAccessKey ? 'font-semibold text-white' : 'font-semibold text-white/82'}`}>
-                  {hasAccessKey ? (isKeyVisible ? accessKey : '••••••••••••••••') : 'No access key available'}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsKeyVisible((value) => !value)}
-                  disabled={!hasAccessKey}
-                  className={`${ICON_BUTTON} w-full sm:w-10`}
-                  title={isKeyVisible ? 'Hide access key' : 'Show access key'}
-                >
-                  {isKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => copyValue('accessKey', accessKey)}
-                  disabled={!hasAccessKey}
-                  className={`${ICON_BUTTON} w-full sm:w-10`}
-                  title="Copy access key"
-                >
-                  {copiedField === 'accessKey' ? <Check size={15} /> : <Copy size={15} />}
-                </button>
-              </div>
-              {!hasAccessKey && (
-                <p className="text-[10px] font-medium text-amber-300/80">
-                  Generate an access key from the dashboard before using the local gateway.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-
+          {!hasAccessKey && (
+            <p className="mt-2 text-[10px] font-medium leading-snug text-amber-200/85">
+              Generate an access key from the dashboard before using the local gateway.
+            </p>
+          )}
+        </section>
       </div>
     </Card>
   );
@@ -1014,8 +1120,9 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   const renderProviderGrid = useCallback((providers, emptyLabel) => {
     if (providers.length === 0) {
       return (
-        <div className="col-span-full rounded-xl border border-dashed border-white/25 bg-slate-950/30 px-4 py-8 text-center font-semibold text-white/82">
-          <p className="text-xs font-medium">{emptyLabel}</p>
+        <div className="col-span-full relative rounded-sm border border-dashed border-white/25 bg-slate-950/30 px-4 py-10 text-center">
+          <p className="font-mono text-[10px] font-extrabold uppercase tracking-[0.24em] text-white/55">{emptyLabel}</p>
+          <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.3em] text-white/30">empty schematic</p>
         </div>
       );
     }
@@ -1043,7 +1150,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-100px)] lg:overflow-hidden lg:px-10 lg:py-6">
+    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-170px)] lg:overflow-hidden lg:px-10 lg:py-6">
       <header className="shrink-0 space-y-1 border-b border-white/15 pb-2 sm:space-y-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1068,19 +1175,30 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
 
       <form onSubmit={handleSave} className="flex-1 flex flex-col gap-4 pb-4 pt-3 min-h-0 pr-0.5 sm:gap-6 sm:pt-4 lg:grid lg:grid-cols-12 lg:gap-8 lg:overflow-hidden lg:pr-0">
                 <div className="lg:col-span-6 flex min-h-0 flex-col lg:h-full">
-          <Card className="flex flex-col min-h-0 lg:h-full p-4 sm:p-5 lg:p-6 lg:overflow-hidden h-auto" style={SETTINGS_CARD_THEMES.activeModel}>
-            <div className="flex items-center justify-between mb-4 shrink-0 sm:mb-5">
-              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-3 tracking-tight">
-                <Globe className="text-white/80" size={20} />
-                Providers
-              </h2>
+          <Card className="relative flex flex-col min-h-0 p-4 sm:p-5 lg:p-6 h-auto lg:h-full" style={SETTINGS_CARD_THEMES.activeModel}>
+            {/* Title block */}
+            <div className="relative shrink-0 mb-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-baseline gap-2 min-w-0 font-mono text-[9px] font-extrabold uppercase tracking-[0.28em]">
+                  <span className="text-white/55 truncate">CONFIG · PROVIDERS</span>
+                </div>
+                <span className="shrink-0 rounded-sm border border-white/25 bg-slate-950/35 px-2 py-1 font-mono text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/80">
+                  {String(form.providers.length).padStart(2, '0')} configured
+                </span>
+              </div>
+              <div className="mt-2 flex items-end justify-between gap-4">
+                <h2 className="text-2xl sm:text-[26px] font-extrabold text-white tracking-tight leading-none">Providers</h2>
+                <p className="hidden sm:block pb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-white/45">
+                  Model proxies &amp; services
+                </p>
+              </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0 lg:overflow-hidden max-lg:flex-none">
-              {/* Fixed top: Popular Providers */}
-              <div className="shrink-0 space-y-2 pb-3">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className={SETTINGS_LABEL}>Popular Providers</h3>
+            <div className="relative flex-1 flex flex-col min-h-0 lg:overflow-hidden max-lg:flex-none">
+              {/* Popular Providers */}
+              <div className="shrink-0 space-y-3 pb-3">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-mono text-[10px] font-extrabold uppercase tracking-[0.24em] text-white/65">Popular Providers</h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="sm:col-span-2">
@@ -1092,39 +1210,41 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                 </div>
               </div>
 
-              {/* Fixed: Custom Provider header */}
-              <div className="shrink-0 flex items-center justify-between gap-3 pt-3 border-t border-white/15">
-                <h3 className={SETTINGS_LABEL}>Custom Provider</h3>
-                <button type="button" onClick={() => setIsAddModalOpen(true)} className="rounded-full border border-white/25 bg-slate-950/35 px-4 py-1.5 text-[10px] font-extrabold uppercase tracking-widest text-white hover:bg-slate-950/50 cursor-pointer">
-                  <Plus size={12} className="inline mr-1" /> Add
-                </button>
+              {/* Custom Providers header */}
+              <div className="shrink-0 pt-3 border-t border-white/15">
+                <div className="flex items-end justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="min-w-0">
+                      <h3 className="font-mono text-[10px] font-extrabold uppercase tracking-[0.24em] text-white/65">Custom Providers</h3>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(true)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-white/30 bg-slate-950/30 px-3 py-1.5 font-mono text-[10px] font-extrabold uppercase tracking-[0.18em] text-white hover:border-white/60 hover:bg-white/10 transition-all cursor-pointer"
+                  >
+                    <Plus size={11} className="text-cyan-300/85" /> New
+                  </button>
+                </div>
               </div>
 
-              {/* Scrollable container displaying exactly one custom provider before scrolling */}
-              <div className="relative mt-3">
+              {/* Scrollable container displaying custom providers */}
+              <div className="relative mt-3 min-h-0 lg:flex-1">
                 <div
                   ref={providerListRef}
                   onScroll={updateProviderScrollState}
-                  className="max-h-[170px] lg:max-h-[340px] overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-2 custom-scrollbar"
+                  className="max-h-[140px] lg:max-h-none lg:h-full overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
                 >
-                  <div className="grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {renderProviderGrid(customProviders, 'No custom provider configured')}
                   </div>
                 </div>
-                <div
-                  className={`pointer-events-none absolute inset-x-0 top-0 h-8 transition-opacity ${providerScrollState.top ? 'opacity-100' : 'opacity-0'}`}
-                  style={{ background: 'linear-gradient(to bottom, rgba(15,23,42,0.92), rgba(15,23,42,0))' }}
-                />
-                <div
-                  className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 transition-opacity ${providerScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
-                  style={{ background: 'linear-gradient(to top, rgba(15,23,42,0.92), rgba(15,23,42,0))' }}
-                />
               </div>
             </div>
           </Card>
         </div>
 
-        <div className="lg:col-span-6 flex min-h-0 flex-col space-y-4 sm:space-y-6 lg:overflow-hidden">
+        <div className="lg:col-span-6 flex min-h-0 flex-col space-y-4 sm:space-y-6 lg:h-full lg:overflow-hidden">
           <ApiConfigCard
             baseUrl={gatewayBaseUrl}
             accessKey={currentAccessKey}
@@ -1241,8 +1361,8 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
           const providerRoutes = Object.entries(getModelRouting()).filter(([_, routeValue]) => routeIncludesProvider(routeValue, provider.id));
 
           return (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
-              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative flex max-h-[calc(100vh-1.5rem)] min-h-[min(680px,calc(100vh-1.5rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl p-4 sm:p-6" style={SETTINGS_CARD_THEMES.activeModel}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-stretch justify-center p-2 bg-slate-950/80 backdrop-blur-md sm:items-center sm:p-4">
+              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative flex h-[calc(100dvh-1rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden rounded-2xl p-3 sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:min-h-[min(680px,calc(100vh-2rem))] sm:p-6" style={SETTINGS_CARD_THEMES.activeModel}>
                 <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 58%)' }} />
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-5">
                 <div className="flex items-start justify-between gap-4 shrink-0">
