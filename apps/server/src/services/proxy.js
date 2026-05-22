@@ -801,7 +801,8 @@ async function proxyRequest(req, res) {
     const isChatCompletions = req.path.includes('/chat/completions');
     const isMessages = req.path.includes('/messages');
     const isNativeAnthropicMessages = isMessages && req.__upstreamProviderIsAnthropicCompatible === true;
-    const shouldEstimateTokenUsage = isBlazeApiUpstream || isNativeAnthropicMessages;
+    const isFreeModelUpstream = isFreeModelProvider(baseUrl);
+    const shouldEstimateTokenUsage = isBlazeApiUpstream || isNativeAnthropicMessages || isFreeModelUpstream;
 
     // Buffer if:
     // 1. Not streaming
@@ -844,7 +845,7 @@ async function proxyRequest(req, res) {
       anthropicTranslator.pushDelta(text, thinking);
     };
     const applyEstimatedUsage = () => {
-      const hasMeaningfulExactUsage = capturedUsage.hasUsage &&
+      const hasMeaningfulExactUsage = !isFreeModelUpstream && capturedUsage.hasUsage &&
         (capturedUsage.totalTokens > 0 || capturedUsage.promptTokens > 0 || capturedUsage.completionTokens > 0);
       if (!shouldEstimateTokenUsage || hasMeaningfulExactUsage) return;
       const estimatedPromptTokens = estimatePromptTokens({
@@ -1089,29 +1090,44 @@ async function proxyRequest(req, res) {
           }
         }
 
-        // Normalization: Translate OpenAI /chat/completions to Anthropic /messages if requested
+        // Normalization: ensure non-streaming /v1/messages responses are
+        // Anthropic-shaped with a top-level `usage: { input_tokens, output_tokens }`.
+        // Claude CLI's `/model` validation probe crashes on `R.usage.input_tokens`
+        // otherwise — either when the upstream returns OpenAI-shape `usage`
+        // (`prompt_tokens`/`completion_tokens`) without a `choices` array, or
+        // when the upstream returns a non-JSON body.
         if (isMessages) {
+          let parsed = null;
           try {
-            const parsed = JSON.parse(rawBody);
+            parsed = JSON.parse(rawBody);
+          } catch (e) {
+            console.error('[proxy] Non-streaming /messages: upstream returned non-JSON body:', e.message);
+          }
+
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             captureUsage(parsed);
-            if (parsed.choices && Array.isArray(parsed.choices)) {
-              // console.log('[proxy] Translating non-streaming OpenAI response to Anthropic format');
+            if (Array.isArray(parsed.choices)) {
               const translated = translateOpenAIToAnthropic(parsed, requestedModel);
               finalBody = JSON.stringify(translated);
             } else {
-              // Ensure usage exists even if not translated
-              const parsedFinal = JSON.parse(finalBody);
-              if (parsedFinal && !parsedFinal.usage) {
-                const usage = normalizeTokenUsage(parsedFinal);
-                parsedFinal.usage = {
-                  input_tokens: usage.promptTokens || 0,
-                  output_tokens: usage.completionTokens || 0,
-                };
-                finalBody = JSON.stringify(parsedFinal);
-              }
+              const usage = normalizeTokenUsage(parsed);
+              parsed.usage = {
+                input_tokens: usage.promptTokens || 0,
+                output_tokens: usage.completionTokens || 0,
+              };
+              finalBody = JSON.stringify(parsed);
             }
-          } catch (e) {
-            console.error('[proxy] Failed to translate non-streaming response:', e.message);
+          } else {
+            finalBody = JSON.stringify({
+              type: 'error',
+              error: {
+                type: 'api_error',
+                message: 'Upstream returned a non-JSON response body.',
+              },
+              usage: { input_tokens: 0, output_tokens: 0 },
+            });
+            if (upstreamRes.status < 400) upstreamRes.status = 502;
+            contentType = 'application/json';
           }
         }
 
@@ -1138,6 +1154,7 @@ async function proxyRequest(req, res) {
           const json = bufferedBody || JSON.parse(rawBody);
           captureUsage(json);
           if (
+            isFreeModelUpstream ||
             !capturedUsage.hasUsage ||
             (capturedUsage.totalTokens === 0 && capturedUsage.promptTokens === 0 && capturedUsage.completionTokens === 0)
           ) {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import { Plus, Trash2, Globe, ChevronDown, ChevronUp, ExternalLink, GitBranch, XCircle, Loader2, Copy, LogOut, Route, ArrowUp, ArrowDown, Check, Eye, EyeOff, KeyRound, Link2, Sparkles, Compass, Cpu, Zap, Network, Edit } from 'lucide-react';
 import {
   fetchConfig,
@@ -90,19 +91,84 @@ const FALLBACK_OPTION = 'bg-cyan-950 text-cyan-50';
 
 // ── GitHub Copilot Auth Card ───────────────────────────────────────────────────
 function CopilotAuthCard({
-  onConnected,
+  setIsModalOpen,
 }) {
-  const { showToast } = useToast();
-  const queryClient = useQueryClient();
-  const [isOpen, setIsOpen] = useState(false);
-  const [flowState, setFlowState] = useState(null);   // active device flow info
-  const [polling, setPolling] = useState(false);
-  const pollTimer = useRef(null);
   const statusQuery = useQuery({
     queryKey: queryKeys.copilotAuthStatus(),
     queryFn: fetchCopilotAuthStatus,
     staleTime: 15_000,
   });
+
+  const status = statusQuery.data;
+  const loading = statusQuery.isPending;
+  const isConnected = status?.hasToken;
+  const isAuthed = status?.authenticated;
+
+  if (loading) return (
+    <div className="relative overflow-hidden rounded-2xl p-5 flex items-center gap-3 text-white/82 text-xs" style={GLASS_STYLE}>
+      <Loader2 size={14} className="animate-spin" /> Loading Copilot status...
+    </div>
+  );
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 p-4 transition-all duration-300 hover:border-white/20 hover:bg-slate-950/50 hover:shadow-[0_8px_30px_rgba(99,102,241,0.04)]">
+      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 60%)' }} />
+      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 shadow-[0_0_8px_rgba(99,102,241,0.08)] mt-0.5">
+            <GitBranch size={15} className={isConnected ? 'text-indigo-300' : 'text-white/70'} />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <h3 className="truncate text-xs font-bold text-white tracking-tight">GitHub Copilot</h3>
+              <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+                isConnected 
+                  ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.08)]' 
+                  : isAuthed 
+                    ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' 
+                    : 'bg-white/5 text-white/50 border border-white/10'
+              }`}>
+                {isConnected ? 'Connected' : isAuthed ? 'Authorized' : 'Not Connected'}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className={`inline-flex items-center gap-1.5 rounded-xl border ${
+              isConnected 
+                ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50' 
+                : 'border-white/20 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white'
+            } text-[10px] font-bold uppercase tracking-wider px-4 py-2 transition-all cursor-pointer`}
+          >
+            {isConnected ? <Edit size={12} /> : <GitBranch size={12} />}
+            {isConnected ? 'Manage Connection' : 'Connect'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CopilotModal({
+  isOpen,
+  setIsOpen,
+  onConnected,
+}) {
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const [flowState, setFlowState] = useState(null);   // active device flow info
+  const [polling, setPolling] = useState(false);
+  const pollTimer = useRef(null);
+  
+  const statusQuery = useQuery({
+    queryKey: queryKeys.copilotAuthStatus(),
+    queryFn: fetchCopilotAuthStatus,
+    staleTime: 15_000,
+  });
+  
   const startFlowMutation = useMutation({ mutationFn: startCopilotDeviceFlow });
   const pollFlowMutation = useMutation({ mutationFn: pollCopilotDeviceFlow });
   const logoutMutation = useMutation({
@@ -187,7 +253,6 @@ function CopilotAuthCard({
       const res = await startFlowMutation.mutateAsync();
       if (!res.success) throw new Error(res.error || 'Failed to start Device Flow');
       setFlowState(res);
-      // Open GitHub device verification in a new tab
       window.open(res.verificationUri, '_blank', 'noopener');
       schedulePoll(res.interval || 5);
     } catch (err) {
@@ -209,159 +274,161 @@ function CopilotAuthCard({
   };
 
   const status = statusQuery.data;
-  const loading = statusQuery.isPending;
   const submitting = startFlowMutation.isPending;
   const isConnected = status?.hasToken;
-  const isAuthed = status?.authenticated;
-
-  if (loading) return (
-    <div className="relative overflow-hidden rounded-2xl p-5 flex items-center gap-3 text-white/82 text-xs" style={GLASS_STYLE}>
-      <Loader2 size={14} className="animate-spin" /> Loading Copilot status...
-    </div>
-  );
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 p-4 transition-all duration-300 hover:border-white/20 hover:bg-slate-950/50 hover:shadow-[0_8px_30px_rgba(99,102,241,0.04)]">
-      <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 60%)' }} />
-      <button
-        type="button"
-        onClick={() => setIsOpen((value) => !value)}
-        className="relative z-10 flex w-full items-center justify-between gap-3 text-left cursor-pointer"
-      >
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 shadow-[0_0_8px_rgba(99,102,241,0.08)]">
-            <GitBranch size={15} className={isConnected ? 'text-indigo-300' : 'text-white/70'} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="truncate text-xs font-bold text-white tracking-tight">GitHub Copilot</h3>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
-            isConnected 
-              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.08)]' 
-              : isAuthed 
-                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' 
-                : 'bg-white/5 text-white/50 border border-white/10'
-          }`}>
-            {isConnected ? 'Connected' : isAuthed ? 'Authorized' : 'Not Connected'}
-          </div>
-          {isOpen ? (
-            <ChevronUp size={14} className="text-white/40" />
-          ) : (
-            <ChevronDown size={14} className="text-white/40" />
-          )}
-        </div>
-      </button>
-
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            key="copilot-card-body"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="relative z-10 overflow-hidden space-y-4 mt-3"
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }} 
+          animate={{ opacity: 1 }} 
+          exit={{ opacity: 0 }} 
+          transition={{ duration: 0.15, ease: 'easeOut' }} 
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsOpen(false);
+              if (flowState) { stopPolling(); setFlowState(null); }
+            }
+          }}
+        >
+          <motion.div 
+            initial={{ scale: 0.97, opacity: 0, y: 8 }} 
+            animate={{ scale: 1, opacity: 1, y: 0 }} 
+            exit={{ scale: 0.97, opacity: 0, y: 4 }} 
+            transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }} 
+            className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" 
+            style={{
+              background: 'linear-gradient(145deg, #090622 0%, #17153a 48%, #1f1a4a 100%)',
+              border: '1px solid rgba(129,140,248,0.25)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 24px 64px rgba(2,6,23,0.58), 0 0 42px rgba(99,102,241,0.14)',
+            }}
           >
-            {/* Connected state */}
-            {isConnected && (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center bg-slate-950/20 rounded-xl border border-white/10 p-3.5">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Automatic token refresh active
+            <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(255,255,255,0.03) 35%, rgba(255,255,255,0) 65%)' }} />
+            
+            <div className="relative z-10 flex items-center justify-between gap-4 shrink-0 border-b border-white/15 pb-4">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-indigo-200">GitHub Copilot</p>
+                <h2 className="mt-1 text-xl font-extrabold text-white">Connection Settings</h2>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setIsOpen(false);
+                  if (flowState) { stopPolling(); setFlowState(null); }
+                }} 
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-slate-950/35 text-white/80 hover:bg-slate-950/55 hover:text-white cursor-pointer"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div className="relative z-10 space-y-4 overflow-y-auto custom-scrollbar pr-1 flex-1 min-h-0">
+              {/* Connected state */}
+              {isConnected && (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-emerald-500/20 bg-slate-950/30 p-4 space-y-3">
+                    <p className="text-[11px] text-white/70 leading-relaxed">
+                      Your GitHub Copilot subscription is connected as a local LLM provider. Requests are proxied locally to your Copilot account.
                     </p>
+                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                      <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
+                        Automatic token refresh active
+                      </span>
+                    </div>
                     {status?.tokenExpiry && (
-                      <p className="text-[9px] text-white/50 font-medium">
-                        Expires: {new Date(status.tokenExpiry).toLocaleTimeString()}
+                      <p className="text-[10px] text-white/50 font-medium">
+                        Expires: {new Date(status.tokenExpiry).toLocaleString()}
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 hover:bg-rose-500/20 hover:border-rose-500/40 text-[10px] text-rose-300 font-bold uppercase tracking-wider px-3.5 py-2 transition-all cursor-pointer"
-                  >
-                    <LogOut size={11} /> Disconnect
-                  </button>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleLogout();
+                        setIsOpen(false);
+                      }}
+                      className="flex items-center justify-center gap-2 w-full py-3 border border-rose-500/20 bg-rose-500/10 hover:bg-rose-500/20 hover:border-rose-500/40 text-[10px] text-rose-300 font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                    >
+                      <LogOut size={12} /> Disconnect Account
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Not connected state */}
-            {!isConnected && !flowState && (
-              <div className="rounded-xl border border-white/10 bg-slate-950/20 p-3.5 flex flex-col gap-3">
-                <p className="text-[11px] text-white/70 leading-relaxed">
-                  Use your GitHub Copilot subscription as an LLM provider. Requests are proxied locally to your Copilot account.
-                </p>
-                <div className="flex justify-end">
+              {/* Not connected state */}
+              {!isConnected && !flowState && (
+                <div className="rounded-2xl border border-white/10 bg-slate-950/20 p-4 space-y-4">
+                  <p className="text-[11px] text-white/70 leading-relaxed">
+                    To connect your GitHub Copilot subscription, click the button below. This will initiate the GitHub Device Flow. You will be provided with a verification code to authorize the application on GitHub.
+                  </p>
                   <button
                     type="button"
                     id="copilot-device-flow-btn"
                     onClick={startFlow}
                     disabled={submitting}
-                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 hover:border-indigo-500/50 text-[10px] font-bold uppercase tracking-wider text-indigo-200 px-4 py-2.5 cursor-pointer disabled:opacity-50 transition-all"
+                    className="flex items-center justify-center gap-2 w-full py-3 border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 hover:border-indigo-500/50 text-[10px] font-extrabold uppercase tracking-wider text-indigo-200 rounded-xl cursor-pointer disabled:opacity-50 transition-all"
                   >
                     {submitting ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
                     Connect Account
                   </button>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Active Device Flow polling state */}
-            {flowState && (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-indigo-500/20 bg-slate-950/40 p-4 space-y-4">
-                  <div className="flex items-center gap-2 text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
-                    <Loader2 size={12} className="animate-spin text-cyan-300" />
-                    Waiting for Authorization
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-[9px] text-white/55 uppercase tracking-widest">Verification Code</p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2.5 font-mono text-xl font-extrabold text-white tracking-[0.25em] text-center shadow-[inset_0_1px_5px_rgba(0,0,0,0.3)]">
-                        {flowState.userCode}
-                      </div>
-                      <button 
-                        type="button" 
-                        onClick={copyCode} 
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white cursor-pointer transition-colors"
-                        title="Copy code"
-                      >
-                        <Copy size={14} />
-                      </button>
+              {/* Active Device Flow polling state */}
+              {flowState && (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-indigo-500/20 bg-slate-950/40 p-4 space-y-4">
+                    <div className="flex items-center gap-2 text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
+                      <Loader2 size={12} className="animate-spin text-cyan-300" />
+                      Waiting for Authorization
                     </div>
+                    <div className="space-y-2">
+                      <p className="text-[9px] text-white/55 uppercase tracking-widest font-extrabold">Verification Code</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2.5 font-mono text-xl font-extrabold text-white tracking-[0.25em] text-center shadow-[inset_0_1px_5px_rgba(0,0,0,0.3)]">
+                          {flowState.userCode}
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={copyCode} 
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white cursor-pointer transition-colors"
+                          title="Copy code"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <a
+                      href={flowState.verificationUri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-3 border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-[10px] font-extrabold uppercase tracking-wider rounded-xl hover:bg-indigo-500/20 hover:text-white transition-all shadow-[0_2px_10px_-4px_rgba(99,102,241,0.2)]"
+                    >
+                      <ExternalLink size={12} />
+                      Open GitHub Auth Portal
+                    </a>
                   </div>
-                  
-                  <a
-                    href={flowState.verificationUri}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-2.5 border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-[10px] font-bold rounded-xl hover:bg-indigo-500/20 hover:text-white transition-all shadow-[0_2px_10px_-4px_rgba(99,102,241,0.2)]"
-                  >
-                    <ExternalLink size={12} />
-                    Open GitHub Auth Portal
-                  </a>
+                  <div className="flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { stopPolling(); setFlowState(null); }}
+                      className="text-[10px] text-white/55 hover:text-white/80 font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    >
+                      Cancel Connection
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => { stopPolling(); setFlowState(null); }}
-                    className="text-[10px] text-white/50 hover:text-white/80 transition-colors cursor-pointer"
-                  >
-                    Cancel Connection
-                  </button>
-                </div>
-              </div>
-            )}
-
+              )}
+            </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -758,11 +825,12 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   };
 
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [isCopilotModalOpen, setIsCopilotModalOpen] = React.useState(false);
   const [newProviderForm, setNewProviderForm] = React.useState({ name: '', baseUrl: '', apiKey: '' });
 
   useEffect(() => {
-    onModalVisibilityChange?.(Boolean(isAddModalOpen || editingProviderId || activeRouteProviderId));
-  }, [activeRouteProviderId, editingProviderId, isAddModalOpen, onModalVisibilityChange]);
+    onModalVisibilityChange?.(Boolean(isAddModalOpen || editingProviderId || activeRouteProviderId || isCopilotModalOpen));
+  }, [activeRouteProviderId, editingProviderId, isAddModalOpen, isCopilotModalOpen, onModalVisibilityChange]);
 
   useEffect(() => () => onModalVisibilityChange?.(false), [onModalVisibilityChange]);
 
@@ -1108,7 +1176,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-170px)] lg:overflow-hidden lg:px-10 lg:py-6">
+    <div className="mx-auto flex w-full max-w-7xl flex-col px-4 pt-4 sm:px-6 lg:h-[calc(100vh-160px)] lg:overflow-hidden lg:px-10 lg:py-6">
       <header className="shrink-0 space-y-1 border-b border-white/15 pb-2 sm:space-y-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1174,6 +1242,8 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                   <div className="sm:col-span-2">
                     <CopilotAuthCard
                       onConnected={ensureCopilotProvider}
+                      isModalOpen={isCopilotModalOpen}
+                      setIsModalOpen={setIsCopilotModalOpen}
                     />
                   </div>
                   {otherPopularProviders.length > 0 && renderProviderGrid(otherPopularProviders)}
@@ -1203,7 +1273,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                 <div
                   ref={providerListRef}
                   onScroll={updateProviderScrollState}
-                  className="max-h-[140px] lg:max-h-none lg:h-full overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
+                  className="max-h-[296px] lg:max-h-none lg:h-full overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {renderProviderGrid(customProviders, 'No custom provider configured')}
@@ -1222,6 +1292,12 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
           />
         </div>
       </form>
+
+      <CopilotModal
+        isOpen={isCopilotModalOpen}
+        setIsOpen={setIsCopilotModalOpen}
+        onConnected={ensureCopilotProvider}
+      />
 
       <AnimatePresence>
         {isAddModalOpen && (

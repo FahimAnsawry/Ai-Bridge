@@ -76,7 +76,7 @@ const StatCard = ({ title, value, icon: Icon, subtitle, theme, delay = 0 }) => {
       <div className="relative z-10 flex items-start justify-between gap-2 sm:gap-2.5">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.14em] mb-1 sm:mb-2 text-white/70 truncate">{title}</p>
-          <p className={`font-black truncate leading-none text-white ${
+          <p className={`font-bold truncate leading-none text-white ${
             isLongValue 
               ? 'text-sm sm:text-base md:text-lg lg:text-xl' 
               : 'text-xl sm:text-2xl'

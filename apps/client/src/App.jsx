@@ -149,8 +149,12 @@ function AppContent() {
     }
   }, [showToast]);
 
-  // If auth is loading and we don't have a session hint, show the global loading screen
-  if (loading && !hasSessionHint) {
+  const PROTECTED_PATH_RE = /^\/(dashboard|settings|logs|models)/;
+  const isProtectedPath = PROTECTED_PATH_RE.test(location.pathname);
+
+  // If auth is loading and we don't have a session hint, show the global loading screen.
+  // On protected routes we skip it entirely and let the page-level skeleton handle loading.
+  if (loading && !hasSessionHint && !isProtectedPath) {
     return <AppLoading />;
   }
 
