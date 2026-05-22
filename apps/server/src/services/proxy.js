@@ -1122,6 +1122,11 @@ async function proxyRequest(req, res) {
             const isWafBlock = /^\s*<(!doctype|html|meta|head)|aliyun_waf|cloudflare|attention required|just a moment/i.test(rawSnippetForFailover);
             if (isWafBlock && canRetry(req)) {
               console.warn(`[proxy] WAF/HTML body from ${providerName} (HTTP ${upstreamRes.status}); attempting failover.`);
+              const currentProvider = activeProvider?.id
+                ? activeProvider
+                : eligibleProviders.find(
+                    p => normalizeBaseUrlForMatch(p.baseUrl) && normalizeBaseUrlForMatch(baseUrl) === normalizeBaseUrlForMatch(p.baseUrl)
+                  ) || activeProvider;
               // 1. Try same-provider key rotation
               const syntheticErr = { response: { status: upstreamRes.status, data: { error: { message: rawSnippetForFailover, code: 'non_json_upstream' } } } };
               const keyResult = await retryWithNextProviderApiKey(req, res, currentProvider, apiKey, {
