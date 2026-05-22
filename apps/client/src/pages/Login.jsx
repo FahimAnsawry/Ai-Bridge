@@ -1,8 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, KeyRound, ShieldCheck, UserRound, Zap } from 'lucide-react';
-import PublicFooter from '../components/layout/PublicFooter';
+import { ArrowLeft, ArrowRight, UserRound, Zap } from 'lucide-react';
 
 function Login() {
   return (
@@ -37,42 +36,17 @@ function Login() {
           </Link>
         </header>
 
-        <main className="grid flex-1 items-center gap-8 py-12 lg:grid-cols-[1fr_0.86fr]">
-          <motion.section
-            initial={false}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="max-w-2xl"
-          >
-            <h1 className="font-['Sora'] text-5xl font-black leading-[1.04] text-white sm:text-6xl" style={{ letterSpacing: 0 }}>
-              Sign in before opening the control room.
-            </h1>
-            <p className="mt-6 max-w-xl text-base leading-8 text-slate-300 sm:text-lg">
-              Use Google authentication to access provider settings, request logs, model sync, and local access key controls.
-            </p>
-
-            <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
-                <KeyRound size={18} className="text-indigo-300" />
-                <p className="mt-3 text-sm font-black text-white">Provider keys stay server-side</p>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
-                <ShieldCheck size={18} className="text-cyan-300" />
-                <p className="mt-3 text-sm font-black text-white">Dashboard actions stay authenticated</p>
-              </div>
-            </div>
-          </motion.section>
-
+        <main className="flex flex-1 items-center justify-center py-12">
           <motion.section
             initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, delay: 0.1 }}
-            className="rounded-lg border border-white/12 bg-white/[0.055] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
+            className="w-full max-w-md rounded-lg border border-white/12 bg-white/[0.055] p-5 shadow-2xl backdrop-blur-xl sm:p-6"
           >
             <div className="border-b border-white/10 pb-5">
               <p className="text-xs font-bold uppercase text-slate-400">Login</p>
-              <h2 className="mt-2 font-['Sora'] text-2xl font-black text-white" style={{ letterSpacing: 0 }}>Continue to AI Proxy</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-400">Choose Google sign-in or continue with the local guest account stored in server files.</p>
+              <h2 className="mt-2 text-2xl font-black text-white" style={{ letterSpacing: 0 }}>Continue to AI Proxy</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">Select an authentication method to manage proxy configurations, monitor real-time logs, and control access keys.</p>
             </div>
 
             <a
@@ -103,8 +77,6 @@ function Login() {
 
           </motion.section>
         </main>
-
-        <PublicFooter />
       </div>
     </div>
   );

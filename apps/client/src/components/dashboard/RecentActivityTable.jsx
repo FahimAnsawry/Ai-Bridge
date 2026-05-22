@@ -3,21 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 
-const METHOD_STYLES = {
-  POST: 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider text-[#818cf8] border border-[rgba(99,102,241,0.3)]',
-  GET: 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider text-[#34d399] border border-[rgba(16,185,129,0.3)]',
-  PUT: 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider text-[#fbbf24] border border-[rgba(251,191,36,0.3)]',
-  DELETE: 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider text-[#fb7185] border border-[rgba(251,113,133,0.3)]',
-  PATCH: 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider text-[#94a3b8] border border-[rgba(148,163,184,0.2)]',
-};
-
-const METHOD_BG = {
-  POST: 'rgba(99,102,241,0.08)',
-  GET: 'rgba(16,185,129,0.08)',
-  PUT: 'rgba(251,191,36,0.08)',
-  DELETE: 'rgba(251,113,133,0.08)',
-  PATCH: 'rgba(148,163,184,0.06)',
-};
 
 function formatRelativeTime(isoString) {
   if (!isoString) return '—';
@@ -154,7 +139,7 @@ const RecentActivityTable = ({ activities = [], loading = false }) => {
         <table className="w-full border-collapse">
           <thead>
             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              {['Time', 'Method', 'Model', 'Status', 'Latency'].map((col) => (
+              {['Time', 'Model', 'Status', 'Latency'].map((col) => (
                 <th
                   key={col}
                   className="px-4 py-3 text-left text-xs font-black uppercase tracking-[0.15em] text-[--color-text-tertiary]"
@@ -183,15 +168,6 @@ const RecentActivityTable = ({ activities = [], loading = false }) => {
                     <td className="px-4 py-3 whitespace-nowrap" title={formatAbsoluteTime(activity.timestamp)}>
                       <span className="font-mono text-xs font-bold text-[--color-text-tertiary]">
                         {formatRelativeTime(activity.timestamp)}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span
-                        className={METHOD_STYLES[activity.method] || METHOD_STYLES.PATCH}
-                        style={{ background: METHOD_BG[activity.method] || METHOD_BG.PATCH }}
-                      >
-                        {activity.method || 'POST'}
                       </span>
                     </td>
 

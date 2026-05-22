@@ -98,7 +98,7 @@ function About() {
 
             <div className="relative grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
               <div className="max-w-3xl">
-                <h1 className="font-['Sora'] text-5xl font-black leading-[1.04] text-white sm:text-6xl" style={{ letterSpacing: 0 }}>
+                <h1 className="text-5xl font-black leading-[1.04] text-white sm:text-6xl" style={{ letterSpacing: 0 }}>
                   A local bridge for people who keep changing models.
                 </h1>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
@@ -130,7 +130,7 @@ function About() {
               <div className="grid gap-3">
                 <div className="rounded-xl border border-white/10 bg-slate-950/28 p-4 transition-colors duration-300 hover:border-indigo-400/20">
                   <p className="text-xs font-black uppercase text-indigo-200">What the bridge does</p>
-                  <p className="mt-3 font-['Sora'] text-2xl font-black text-white" style={{ letterSpacing: 0 }}>
+                  <p className="mt-3 text-2xl font-black text-white" style={{ letterSpacing: 0 }}>
                     Stabilize the client side while the provider side keeps moving.
                   </p>
                 </div>
@@ -194,7 +194,7 @@ function About() {
         >
           <motion.div variants={fadeUp}>
             <p className="text-xs font-black uppercase text-indigo-200">How it is wired</p>
-            <h2 className="mt-3 font-['Sora'] text-3xl font-black text-white sm:text-4xl" style={{ letterSpacing: 0 }}>Small pieces, clear responsibilities.</h2>
+            <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl" style={{ letterSpacing: 0 }}>Small pieces, clear responsibilities.</h2>
             <p className="mt-4 text-sm leading-7 text-slate-400">
               The app keeps route handlers thin and pushes provider, auth, proxy, and logging behavior into services, so the dashboard can stay focused on operating the bridge.
             </p>

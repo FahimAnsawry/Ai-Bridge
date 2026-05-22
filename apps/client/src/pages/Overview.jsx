@@ -157,7 +157,7 @@ const ActivityFeed = ({ logs = [], loading = false }) => (
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-[15px] font-semibold leading-tight" style={{ color: '#FFFFFF' }}>
-                    {log.method || 'POST'} {log.model || 'Unknown'} | {provider}
+                    {log.model || 'Unknown'} | {provider}
                   </p>
                   <p className="mt-1 text-[13px] font-medium leading-tight" style={{ color: 'rgba(255,255,255,0.72)' }}>
                     {formatLatency(log.latencyMs)} / {tokens > 0 ? `${formatCompact(tokens)} tokens` : '-- tokens'} |{' '}

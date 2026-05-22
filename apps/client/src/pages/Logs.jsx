@@ -61,9 +61,9 @@ const Logs = ({ user, onModalVisibilityChange }) => {
   };
 
   const handleExport = () => {
-    const headers = 'Time,Method,Path,Model,Provider,Status,LatencyMs,Tokens,Streaming\n';
+    const headers = 'Time,Path,Model,Provider,Status,LatencyMs,Tokens,Streaming\n';
     const rows = logs.map((log) => [
-      log.timestamp, log.method, log.path, log.model, log.provider || '',
+      log.timestamp, log.path, log.model, log.provider || '',
       log.status, log.latencyMs, getTokenTotal(log), log.streaming,
     ].join(','));
     const blob = new Blob([headers + rows.join('\n')], { type: 'text/csv' });
@@ -78,7 +78,7 @@ const Logs = ({ user, onModalVisibilityChange }) => {
       ? logs.filter((log) => {
         const q = search.toLowerCase();
         return log.path?.toLowerCase().includes(q) || log.model?.toLowerCase().includes(q) ||
-               String(log.status).includes(q) || log.method?.toLowerCase().includes(q);
+               String(log.status).includes(q);
       })
       : logs
   ), [logs, search]);
@@ -174,7 +174,7 @@ const Logs = ({ user, onModalVisibilityChange }) => {
                 background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border-strong)',
                 color: 'var(--color-text-primary)',
               }}
-              placeholder="Search by model, path, method or status..."
+              placeholder="Search by model, path or status..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onFocus={e => { e.target.style.borderColor = 'rgba(99,102,241,0.5)'; }}

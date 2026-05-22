@@ -89,7 +89,7 @@ function Home() {
           </div>
 
           <motion.div variants={fadeUp} className="relative z-10 max-w-3xl">
-            <h1 className="max-w-3xl font-['Sora'] text-3xl sm:text-5xl md:text-6xl lg:text-7xl" style={{ letterSpacing: 0 }}>
+            <h1 className="max-w-3xl text-3xl sm:text-5xl md:text-6xl lg:text-7xl" style={{ letterSpacing: 0 }}>
               Route every model request through one sharp local bridge.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
@@ -128,7 +128,7 @@ function Home() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
                 <div className="min-w-0">
                   <p className="text-xs font-bold uppercase text-slate-400">Routing Deck</p>
-                  <p className="mt-1 font-['Sora'] text-sm sm:text-lg md:text-xl font-black text-white break-all" style={{ letterSpacing: 0 }}>https://ai-bridge-zag2.onrender.com/v1</p>
+                  <p className="mt-1 text-sm sm:text-lg md:text-xl font-black text-white break-all" style={{ letterSpacing: 0 }}>https://ai-bridge-zag2.onrender.com/v1</p>
                 </div>
                 <span className="rounded-lg bg-indigo-300/15 px-3 py-1.5 text-xs font-black text-indigo-100 animate-pulse self-start sm:self-auto shrink-0">online</span>
               </div>
@@ -148,8 +148,7 @@ function Home() {
               </div>
               <div className="mt-5 space-y-2">
                 {consoleRows.map((row) => (
-                  <div key={`${row.method}-${row.model}`} className="grid grid-cols-[44px_minmax(0,1fr)_auto_32px] sm:grid-cols-[56px_minmax(0,1fr)_64px_48px] items-center gap-2 sm:gap-3 rounded-lg border border-white/8 bg-black/24 px-2.5 py-2.5 sm:px-3 sm:py-3 text-xs transition-colors duration-300 hover:border-white/14">
-                    <span className="font-mono font-bold text-slate-400">{row.method}</span>
+                  <div key={row.model} className="grid grid-cols-[minmax(0,1fr)_auto_32px] sm:grid-cols-[minmax(0,1fr)_64px_48px] items-center gap-2 sm:gap-3 rounded-lg border border-white/8 bg-black/24 px-2.5 py-2.5 sm:px-3 sm:py-3 text-xs transition-colors duration-300 hover:border-white/14">
                     <span className="truncate font-mono text-slate-200">{row.model}</span>
                     <span className="font-mono text-slate-400 text-[10px] sm:text-xs">{row.ms}</span>
                     <span className={`text-right font-mono font-black ${row.tone === 'indigo' ? 'text-indigo-300' : row.tone === 'cyan' ? 'text-cyan-300' : 'text-rose-300'}`}>{row.status}</span>
@@ -165,7 +164,7 @@ function Home() {
                   variants={fadeUp}
                   className="rounded-lg border border-white/12 bg-white/[0.045] p-4 sm:p-5 backdrop-blur transition-all duration-300 hover:border-indigo-400/20 hover:bg-white/[0.06]"
                 >
-                  <p className="font-['Sora'] text-3xl font-black text-white" style={{ letterSpacing: 0 }}>{stat.value}</p>
+                  <p className="text-3xl font-black text-white" style={{ letterSpacing: 0 }}>{stat.value}</p>
                   <p className="mt-2 text-sm font-semibold text-slate-400">{stat.label}</p>
                 </motion.div>
               ))}
@@ -210,7 +209,7 @@ function Home() {
         >
           <motion.div variants={fadeUp}>
             <p className="text-xs font-black uppercase text-indigo-200">From setup to signal</p>
-            <h2 className="mt-3 font-['Sora'] text-3xl font-black text-white sm:text-4xl" style={{ letterSpacing: 0 }}>A quieter way to run noisy AI traffic.</h2>
+            <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl" style={{ letterSpacing: 0 }}>A quieter way to run noisy AI traffic.</h2>
           </motion.div>
           <div className="grid gap-3 sm:grid-cols-2">
             {[

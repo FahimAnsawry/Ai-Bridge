@@ -63,7 +63,7 @@ const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
     <>
       {!mobileOpen && (
         <div
-          className="fixed left-4 top-4 z-[60] lg:hidden"
+          className="fixed left-4 top-4 z-[60] hidden md:block lg:hidden"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -96,7 +96,7 @@ const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onCloseMobile}
-            className="fixed inset-0 z-30 lg:hidden"
+            className="fixed inset-0 z-30 hidden md:block lg:hidden"
             style={{ background: 'rgba(3,6,34,0.72)', backdropFilter: 'blur(7px)' }}
           />
         )}
@@ -107,7 +107,7 @@ const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
         animate={{ width: SIDEBAR_WIDTH }}
         style={{ background: 'transparent' }}
         className={[
-          'fixed inset-y-0 left-0 z-40 flex h-dvh shrink-0 flex-col items-center overflow-hidden lg:sticky lg:top-0',
+          'fixed inset-y-0 left-0 z-40 hidden md:flex h-dvh shrink-0 flex-col items-center overflow-hidden lg:sticky lg:top-0',
           'px-0 py-0',
           'transition-transform duration-300 ease-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',

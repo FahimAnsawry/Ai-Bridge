@@ -32,7 +32,6 @@ const LiveConsole = ({ logs, autoScroll = true }) => {
             <span className={`font-bold shrink-0 w-16 ${log.status < 400 ? 'text-[--color-success]' : 'text-[--color-danger]'}`}>
               {log.status}
             </span>
-            <span className="text-[--color-accent-indigo] font-medium shrink-0 w-12">{log.method}</span>
             <span className="text-amber-500/80 truncate shrink-0 w-32">{log.model || 'N/A'}</span>
             <span className="text-cyan-500/80 truncate shrink-0 w-24">{log.provider || '—'}</span>
             <span className="text-[--color-text-secondary] truncate flex-1">{log.path}</span>
