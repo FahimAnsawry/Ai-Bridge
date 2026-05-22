@@ -110,7 +110,7 @@ const SettingsSkeleton = () => {
                 </div>
 
                 <div className="relative mt-3">
-                  <div className="max-h-[296px] overflow-y-auto pr-1 pb-2 custom-scrollbar w-full">
+                  <div className="max-h-[170px] md:max-h-[340px] overflow-y-auto pr-1 pb-2 custom-scrollbar w-full">
                     <div className="grid grid-cols-1 gap-4">
                       <ProviderCardSkeleton />
                       <ProviderCardSkeleton />

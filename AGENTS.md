@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository contains a local AI proxy server and React dashboard. Backend code lives in `apps/server/src`, organized by `config`, `middleware`, `models`, `routes`, `services`, and `utils`. The frontend lives in `apps/client/src`, with pages under `pages`, reusable UI under `components`, shared API helpers under `api`, and static assets under `assets` and `public`. Operational notes live in `README.md`.
+This repository contains a local AI Bridge server and React dashboard. Backend code lives in `apps/server/src`, organized by `config`, `middleware`, `models`, `routes`, `services`, and `utils`. The frontend lives in `apps/client/src`, with pages under `pages`, reusable UI under `components`, shared API helpers under `api`, and static assets under `assets` and `public`. Operational notes live in `README.md`.
 
 ## Build, Test, and Development Commands
 

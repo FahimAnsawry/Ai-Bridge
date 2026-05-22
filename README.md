@@ -14,7 +14,7 @@ Follow this step-by-step guide to get the local proxy and dashboard up and runni
 
 ### Step 1: Install Server Dependencies
 
-First, from the root of the project (`ai-proxy-webapp`), install the dependencies necessary for the backend Express server:
+First, from the root of the project (`ai-bridge`), install the dependencies necessary for the backend Express server:
 
 ```bash
 npm install
@@ -47,7 +47,7 @@ This command executes two scripts at the same time:
 Once the services are active, check your terminal for the exact Vite frontend URL. Open that URL in your web browser. From the UI dashboard, you can:
 - **Overview**: See server status and traffic charts.
 - **Settings**: Manage your upstream provider settings, including SwiftRouter's OpenAI-compatible base URL and API key, plus your local intercept key.
-- **Logs**: Monitor incoming AI proxy requests in real-time.
+- **Logs**: Monitor incoming AI Bridge requests in real-time.
 
 ### Configuration file (`config.json`)
 
