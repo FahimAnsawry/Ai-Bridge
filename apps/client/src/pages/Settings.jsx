@@ -1342,7 +1342,7 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                 <div
                   ref={providerListRef}
                   onScroll={updateProviderScrollState}
-                  className="max-h-[296px] lg:max-h-none lg:h-full overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
+                  className="max-h-[296px] overflow-y-auto overscroll-contain scroll-smooth pr-1 pb-4 custom-scrollbar"
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {renderProviderGrid(customProviders, 'No custom provider configured')}
