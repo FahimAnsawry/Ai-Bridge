@@ -329,9 +329,6 @@ function CopilotModal({
               {isConnected && (
                 <div className="space-y-4">
                   <div className="rounded-2xl border border-emerald-500/20 bg-slate-950/30 p-4 space-y-3">
-                    <p className="text-[11px] text-white/70 leading-relaxed">
-                      Your GitHub Copilot subscription is connected as a local LLM provider. Requests are proxied locally to your Copilot account.
-                    </p>
                     <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                       <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
