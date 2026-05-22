@@ -99,6 +99,7 @@ function AppContent() {
       localStorage.removeItem('auth_verified');
       return false;
     }
+    if (params.get('login') === 'success') return true;
     return localStorage.getItem('auth_verified') === 'true';
   });
 

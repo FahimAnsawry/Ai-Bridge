@@ -266,65 +266,23 @@ function CopilotAuthCard({
           >
             {/* Connected state */}
             {isConnected && (
-              <div className="space-y-3.5">
-                <div className="rounded-xl border border-white/10 bg-slate-950/45 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-slate-950/20 rounded-xl border border-white/10 p-3.5">
+                  <div className="space-y-1">
                     <p className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Active Proxy Endpoints
+                      Automatic token refresh active
                     </p>
                     {status?.tokenExpiry && (
-                      <span className="text-[9px] text-white/50">
+                      <p className="text-[9px] text-white/50 font-medium">
                         Expires: {new Date(status.tokenExpiry).toLocaleTimeString()}
-                      </span>
+                      </p>
                     )}
                   </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-slate-950/40 px-2.5 py-2">
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <p className="text-[8px] font-extrabold uppercase tracking-wider text-white/40">OpenAI Format</p>
-                        <p className="font-mono text-[10px] text-white/80 truncate">/copilot/v1/chat/completions</p>
-                      </div>
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          navigator.clipboard.writeText('/copilot/v1/chat/completions');
-                          showToast('Endpoint path copied!', 'success');
-                        }}
-                        className="p-1.5 rounded hover:bg-white/5 text-white/40 hover:text-white transition-colors"
-                        title="Copy endpoint"
-                      >
-                        <Copy size={11} />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-slate-950/40 px-2.5 py-2">
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <p className="text-[8px] font-extrabold uppercase tracking-wider text-white/40">Anthropic Format</p>
-                        <p className="font-mono text-[10px] text-white/80 truncate">/copilot/v1/messages</p>
-                      </div>
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          navigator.clipboard.writeText('/copilot/v1/messages');
-                          showToast('Endpoint path copied!', 'success');
-                        }}
-                        className="p-1.5 rounded hover:bg-white/5 text-white/40 hover:text-white transition-colors"
-                        title="Copy endpoint"
-                      >
-                        <Copy size={11} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-center pt-1">
-                  <span className="text-[9px] text-white/40 font-medium">Automatic token refresh active</span>
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="flex items-center gap-1 text-[10px] text-rose-400 hover:text-rose-300 font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 hover:bg-rose-500/20 hover:border-rose-500/40 text-[10px] text-rose-300 font-bold uppercase tracking-wider px-3.5 py-2 transition-all cursor-pointer"
                   >
                     <LogOut size={11} /> Disconnect
                   </button>
