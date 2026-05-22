@@ -24,7 +24,7 @@ function Login() {
             >
               <Zap size={18} fill="currentColor" />
             </span>
-            <span className="font-bold text-white" style={{ letterSpacing: 0 }}>AI Proxy</span>
+            <span className="font-black text-white uppercase" style={{ letterSpacing: 0 }}>AI BRIDGE</span>
           </Link>
 
           <Link
@@ -45,7 +45,7 @@ function Login() {
           >
             <div className="border-b border-white/10 pb-5">
               <p className="text-xs font-bold uppercase text-slate-400">Login</p>
-              <h2 className="mt-2 text-2xl font-black text-white" style={{ letterSpacing: 0 }}>Continue to AI Proxy</h2>
+              <h2 className="mt-2 text-2xl font-black text-white" style={{ letterSpacing: 0 }}>Continue to AI Bridge</h2>
               <p className="mt-3 text-sm leading-6 text-slate-400">Select an authentication method to manage proxy configurations, monitor real-time logs, and control access keys.</p>
             </div>
 

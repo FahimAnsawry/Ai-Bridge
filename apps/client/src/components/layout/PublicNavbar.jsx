@@ -61,11 +61,8 @@ const PublicNavbar = () => {
               <Zap size={16} className="text-indigo-300 transition-colors duration-300 group-hover:text-indigo-200" />
             </span>
             <div className="hidden sm:block">
-              <span className="text-base font-bold text-white tracking-tight">
-                AI Proxy
-              </span>
-              <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Bridge
+              <span className="text-base font-black text-white tracking-tight uppercase">
+                AI BRIDGE
               </span>
             </div>
           </NavLink>

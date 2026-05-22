@@ -22,13 +22,13 @@ No test suite is configured.
 
 ## Architecture
 
-This is a local AI proxy server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (SwiftRouter, Anthropic, OpenAI-compatible APIs, GitHub Copilot).
+This is a local AI bridge server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (SwiftRouter, Anthropic, OpenAI-compatible APIs, GitHub Copilot).
 
 ### Single-server setup
 
 The app runs one Express HTTP server from a single Node process:
 
-- **Unified server** (`port 3000`) — serves the AI proxy (`/v1/*`), Copilot proxy (`/copilot/*`), dashboard REST API (`/api/*`), auth routes (`/auth/*`), health checks, Socket.IO, and the built React dashboard when `apps/client/dist` exists.
+- **Unified server** (`port 3000`) — serves the AI bridge (`/v1/*`), Copilot proxy (`/copilot/*`), dashboard REST API (`/api/*`), auth routes (`/auth/*`), health checks, Socket.IO, and the built React dashboard when `apps/client/dist` exists.
 
 `ProxyRuntime` (`apps/server/src/services/proxy-runtime.js`) runs in embedded mode for standalone startup, so proxy routes are mounted on the unified Express app instead of opening a second HTTP listener.
 

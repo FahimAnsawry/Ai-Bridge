@@ -58,12 +58,9 @@ function AppLoading() {
           <Zap size={36} className="relative z-10 text-indigo-300" />
         </div>
 
-        <h3 className="text-lg font-bold tracking-tight text-white mb-1">
-          AI Proxy
+        <h3 className="text-lg font-black tracking-tight text-white mb-6 uppercase">
+          AI BRIDGE
         </h3>
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 mb-6">
-          Bridge
-        </p>
 
         {/* Linear Loading Progress Indicator */}
         <div className="w-48 h-1 bg-white/10 rounded-full overflow-hidden relative">

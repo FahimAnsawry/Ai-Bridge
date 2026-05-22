@@ -183,7 +183,7 @@ function createWebServer(options = {}) {
 
   app.get('/{*path}', (req, res) => {
     res.status(200).json({
-      message: 'AI Proxy Server is running.',
+      message: 'AI Bridge Server is running.',
       dashboard: options.dashboardUrl || 'http://localhost:5174',
     });
   });
@@ -246,7 +246,7 @@ async function startStandaloneServer() {
     const state = await runtime.getState();
     const endpoint = state.endpoint || `${baseUrl}/v1`;
     console.log('');
-    console.log('AI Proxy Server - SwiftRouter');
+    console.log('AI Bridge Server - SwiftRouter');
     console.log(`Proxy:     ${endpoint}`);
     console.log(`API:       ${baseUrl}/api`);
     console.log(`Dashboard: ${dashboardUrl}`);

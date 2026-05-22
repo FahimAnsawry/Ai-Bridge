@@ -22,7 +22,7 @@ function PublicFooter() {
               <Zap size={16} fill="currentColor" />
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-black text-white" style={{ letterSpacing: 0 }}>AI Proxy</p>
+              <p className="text-sm font-black text-white uppercase" style={{ letterSpacing: 0 }}>AI BRIDGE</p>
               <p className="mt-1 text-xs leading-5 text-slate-400 sm:text-sm">Local model routing, visibility, and access control.</p>
             </div>
           </div>

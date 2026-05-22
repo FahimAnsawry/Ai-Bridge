@@ -46,7 +46,7 @@ const stats = [
 
 const pipeline = [
   { label: 'Client tool', detail: 'Kilo Code, Claude Code, SDKs', icon: TerminalSquare },
-  { label: 'AI Proxy', detail: 'Auth, logs, routing', icon: ServerCog },
+  { label: 'AI Bridge', detail: 'Auth, logs, routing', icon: ServerCog },
   { label: 'Provider', detail: 'Compatible API', icon: Layers },
 ];
 
@@ -98,7 +98,7 @@ function Home() {
               Route every model request through one sharp local bridge.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-              AI Proxy WebApp gives your tools a stable endpoint, keeps provider credentials tucked away, and turns raw request traffic into a dashboard you can actually operate from.
+              AI Bridge gives your tools a stable endpoint, keeps provider credentials tucked away, and turns raw request traffic into a dashboard you can actually operate from.
             </p>
 
             <motion.div variants={fadeUp} className="mt-8 flex flex-wrap gap-3">

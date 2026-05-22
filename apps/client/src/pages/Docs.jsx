@@ -36,7 +36,7 @@ function Docs({ user }) {
       cardClass: 'border-rose-200/22 bg-rose-950/22 hover:border-rose-200/42 hover:bg-rose-950/30',
       iconClass: 'bg-rose-400 text-white',
       dotClass: 'bg-rose-300',
-      body: 'Use the Routes button on a provider card to attach model IDs to that provider. Claude CLI requests keep the model name they ask for; the proxy uses your route to choose where that exact model goes.',
+      body: 'Use the Routes button on a provider card to attach model IDs to that provider. Claude CLI requests keep the model name they ask for; the bridge uses your route to choose where that exact model goes.',
       code: 'claude-sonnet-4-6 -> Cpass\ngpt-5.5 -> SwiftRouter\ndeepseek-v4-pro -> AgentRouter, MirrorCore',
       notes: ['Put fallback providers in priority order when a model can run in more than one place.', 'If model routes exist, requested models must be added before use.'],
     },
@@ -57,10 +57,10 @@ function Docs({ user }) {
           <h1
             className="text-2xl font-black tracking-tight text-white sm:text-3xl md:text-4xl"
           >
-            Use AI Proxy Bridge with Claude CLI
+            Use AI Bridge with Claude CLI
           </h1>
           <p className="mt-5 text-base font-medium leading-8 text-slate-300">
-            Point Claude CLI at the local `/v1/messages` proxy, keep provider keys in the dashboard,
+            Point Claude CLI at the local `/v1/messages` bridge, keep provider keys in the dashboard,
             and control exactly which upstream handles each model.
           </p>
         </motion.header>

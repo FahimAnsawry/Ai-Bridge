@@ -41,7 +41,7 @@ const LiveClock = () => {
 
 const PageHeader = ({
   title = 'Overview',
-  subtitle = 'AI Proxy Gateway · Dashboard',
+  subtitle = 'AI Bridge Gateway · Dashboard',
   isConnected,
   onRefresh,
   endpoint,

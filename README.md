@@ -1,6 +1,6 @@
-# AI Proxy WebApp
+# AI BRIDGE
 
-AI Proxy WebApp is a local proxy server and dashboard that acts as a bridge for AI API requests (like Kilo Code, Cline, etc.) to an external API provider. It intercepts your requests seamlessly while offering an intuitive React dashboard for API key management, real-time logging, and system configurations.
+AI Bridge is a local proxy server and dashboard that acts as a bridge for AI API requests (like Kilo Code, Cline, etc.) to an external API provider. It intercepts your requests seamlessly while offering an intuitive React dashboard for API key management, real-time logging, and system configurations.
 
 ## Prerequisites
 
@@ -157,7 +157,7 @@ Keep `SWIFTROUTER_API_KEY` on your server or API route. Do not expose it directl
 
 To use this local proxy in your VS Code extension (e.g., Kilo Code / Cline):
 1. Set the **API Base URL** to `http://localhost:3000/v1`
-2. Set the **API Key** to your **Local AI Proxy Key** (found in your dashboard settings, defaulting to `local-my-secret-key`).
+2. Set the **API Key** to your **Local AI Bridge Key** (found in your dashboard settings, defaulting to `local-my-secret-key`).
 
 Your extension will now route requests through the local proxy to your actual provider!
 
