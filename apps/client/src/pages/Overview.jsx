@@ -59,29 +59,37 @@ function normalizeModelDistribution(dist = []) {
   }));
 }
 
-const StatCard = ({ title, value, icon: Icon, subtitle, theme, delay = 0 }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 24 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.45, delay, ease: [0.23, 1, 0.32, 1] }}
-    className="relative h-[92px] overflow-hidden rounded-2xl p-3.5 cursor-default sm:h-[104px] sm:p-5"
-    style={{ background: theme.gradient, boxShadow: `0 8px 32px ${theme.glow}` }}
-  >
-    {/* inner shine */}
-    <div className="absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 60%)' }} />
+const StatCard = ({ title, value, icon: Icon, subtitle, theme, delay = 0 }) => {
+  const isLongValue = typeof value === 'string' && value.length > 10;
 
-    <div className="relative z-10 flex items-start justify-between gap-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] mb-1.5 sm:mb-2 text-white/70">{title}</p>
-        <p className="text-xl sm:text-2xl font-black truncate leading-none text-white">{value}</p>
-        {subtitle && <p className="mt-1 sm:mt-1.5 text-[11px] sm:text-xs font-medium truncate text-white/60">{subtitle}</p>}
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay, ease: [0.23, 1, 0.32, 1] }}
+      className="relative h-[88px] overflow-hidden rounded-2xl p-3 cursor-default sm:h-[104px] sm:p-5"
+      style={{ background: theme.gradient, boxShadow: `0 8px 32px ${theme.glow}` }}
+    >
+      {/* inner shine */}
+      <div className="absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 60%)' }} />
+
+      <div className="relative z-10 flex items-start justify-between gap-1.5 sm:gap-2.5">
+        <div className="min-w-0 flex-1">
+          <p className="text-[8px] sm:text-[10px] font-bold uppercase tracking-[0.14em] mb-1 sm:mb-2 text-white/70 truncate">{title}</p>
+          <p className={`font-black truncate leading-none text-white ${
+            isLongValue 
+              ? 'text-[11px] sm:text-base md:text-lg lg:text-xl' 
+              : 'text-base sm:text-2xl'
+          }`}>{value}</p>
+          {subtitle && <p className="mt-0.5 sm:mt-1.5 text-[9px] sm:text-xs font-medium truncate text-white/60">{subtitle}</p>}
+        </div>
+        <div className="flex h-7 w-7 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-white/20">
+          <Icon size={14} className="text-white sm:w-[18px] sm:h-[18px]" />
+        </div>
       </div>
-      <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-white/20">
-        <Icon size={16} className="text-white sm:w-[18px] sm:h-[18px]" />
-      </div>
-    </div>
-  </motion.div>
-);
+    </motion.div>
+  );
+};
 
 const ActivityFeed = ({ logs = [], loading = false }) => (
   <motion.div
@@ -256,7 +264,7 @@ const Overview = ({ user }) => {
   return (
     <div className="flex min-h-full flex-col gap-5 overflow-x-hidden lg:h-full lg:min-h-0 lg:overflow-hidden">
       <div className="shrink-0">
-        <PageHeader isConnected={!fetchError} onRefresh={handleRefresh} isRefreshing={isRefreshing} />
+        <PageHeader onRefresh={handleRefresh} isRefreshing={isRefreshing} />
       </div>
 
       <div className="min-h-0 flex-1 lg:overflow-hidden">

@@ -39,7 +39,16 @@ const LiveClock = () => {
   );
 };
 
-const PageHeader = ({ isConnected, onRefresh, endpoint, onCopy, copied, isRefreshing }) => {
+const PageHeader = ({
+  title = 'Overview',
+  subtitle = 'AI Proxy Gateway · Dashboard',
+  isConnected,
+  onRefresh,
+  endpoint,
+  onCopy,
+  copied,
+  isRefreshing,
+}) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -59,50 +68,52 @@ const PageHeader = ({ isConnected, onRefresh, endpoint, onCopy, copied, isRefres
             animation: 'text-gradient-shift 5s linear infinite',
           }}
         >
-          Overview
+          {title}
         </h1>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[--color-text-tertiary] mt-1.5">
-          AI Proxy Gateway · Dashboard
+          {subtitle}
         </p>
       </div>
 
       <div className="flex items-center gap-3">
-        <div
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-black uppercase tracking-widest border"
-          style={
-            isConnected
-              ? {
-                  background: 'rgba(16,185,129,0.08)',
-                  borderColor: 'rgba(16,185,129,0.3)',
-                  color: '#10b981',
-                  boxShadow: '0 0 16px rgba(16,185,129,0.2)',
-                }
-              : {
-                  background: 'rgba(251,113,133,0.08)',
-                  borderColor: 'rgba(251,113,133,0.3)',
-                  color: '#fb7185',
-                  boxShadow: '0 0 16px rgba(251,113,133,0.2)',
-                }
-          }
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className={isConnected ? 'animate-pulse' : ''}
+        {isConnected !== undefined && (
+          <div
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-black uppercase tracking-widest border"
+            style={
+              isConnected
+                ? {
+                    background: 'rgba(16,185,129,0.08)',
+                    borderColor: 'rgba(16,185,129,0.3)',
+                    color: '#10b981',
+                    boxShadow: '0 0 16px rgba(16,185,129,0.2)',
+                  }
+                : {
+                    background: 'rgba(251,113,133,0.08)',
+                    borderColor: 'rgba(251,113,133,0.3)',
+                    color: '#fb7185',
+                    boxShadow: '0 0 16px rgba(251,113,133,0.2)',
+                  }
+            }
           >
-            <path
-              d="M12 2L14.5 9L22 10L16 15L18 22L12 18L6 22L8 15L2 10L9.5 9L12 2Z"
-              fill={isConnected ? '#10b981' : '#fb7185'}
-              stroke={isConnected ? '#34d399' : '#f87171'}
-              strokeWidth="0.5"
-              strokeLinejoin="round"
-            />
-          </svg>
-          {isConnected ? 'Server Online' : 'Server Offline'}
-        </div>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className={isConnected ? 'animate-pulse' : ''}
+            >
+              <path
+                d="M12 2L14.5 9L22 10L16 15L18 22L12 18L6 22L8 15L2 10L9.5 9L12 2Z"
+                fill={isConnected ? '#10b981' : '#fb7185'}
+                stroke={isConnected ? '#34d399' : '#f87171'}
+                strokeWidth="0.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {isConnected ? 'Server Online' : 'Server Offline'}
+          </div>
+        )}
 
         {endpoint && (
           <motion.div

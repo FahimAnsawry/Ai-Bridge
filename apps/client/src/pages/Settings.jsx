@@ -1154,7 +1154,19 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
       <header className="shrink-0 space-y-1 border-b border-white/15 pb-2 sm:space-y-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-white sm:text-4xl">System Settings</h1>
+            <h1
+              className="text-2xl font-black tracking-tight sm:text-4xl"
+              style={{
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+                backgroundSize: '200% auto',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                animation: 'text-gradient-shift 5s linear infinite',
+              }}
+            >
+              System Settings
+            </h1>
             <p className="text-xs font-medium text-white/82 sm:text-sm">Configure your gateway, providers, and security.</p>
           </div>
           {saveStatus.state !== 'idle' && (

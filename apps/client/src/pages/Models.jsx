@@ -214,7 +214,19 @@ const Models = () => {
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Model Inventory</p>
         </div>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h1 className="text-2xl font-extrabold tracking-tight text-white">Active Models</h1>
+          <h1
+            className="text-2xl font-black tracking-tight"
+            style={{
+              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'text-gradient-shift 5s linear infinite',
+            }}
+          >
+            Active Models
+          </h1>
           <div className="flex items-center gap-3">
             <label className="relative block">
               <span className="sr-only">Filter provider</span>

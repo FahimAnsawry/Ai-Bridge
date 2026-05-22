@@ -126,7 +126,15 @@ const Logs = ({ user, onModalVisibilityChange }) => {
         <div>
           <p className="mb-2 text-xs font-black uppercase tracking-[0.25em] text-[--color-text-tertiary]">Live Stream</p>
           <h1
-            className="text-2xl font-black tracking-tight text-[--color-text-primary] lg:text-3xl"
+            className="text-2xl font-black tracking-tight lg:text-3xl"
+            style={{
+              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'text-gradient-shift 5s linear infinite',
+            }}
           >
             Request Activity
           </h1>

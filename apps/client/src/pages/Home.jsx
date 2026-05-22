@@ -89,7 +89,18 @@ function Home() {
           </div>
 
           <motion.div variants={fadeUp} className="relative z-10 max-w-3xl">
-            <h1 className="max-w-3xl text-3xl sm:text-5xl md:text-6xl lg:text-7xl" style={{ letterSpacing: 0 }}>
+            <h1
+              className="max-w-3xl text-3xl font-black sm:text-5xl md:text-6xl lg:text-7xl"
+              style={{
+                letterSpacing: 0,
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+                backgroundSize: '200% auto',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                animation: 'text-gradient-shift 5s linear infinite',
+              }}
+            >
               Route every model request through one sharp local bridge.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">

@@ -98,7 +98,18 @@ function About() {
 
             <div className="relative grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
               <div className="max-w-3xl">
-                <h1 className="text-5xl font-black leading-[1.04] text-white sm:text-6xl" style={{ letterSpacing: 0 }}>
+                <h1
+                  className="text-5xl font-black leading-[1.04] sm:text-6xl"
+                  style={{
+                    letterSpacing: 0,
+                    background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+                    backgroundSize: '200% auto',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                    animation: 'text-gradient-shift 5s linear infinite',
+                  }}
+                >
                   A local bridge for people who keep changing models.
                 </h1>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">

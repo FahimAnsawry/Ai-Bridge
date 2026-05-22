@@ -39,7 +39,7 @@ const OverviewSkeleton = () => {
 
 const SkeletonCard = ({ index }) => (
   <div
-    className="relative h-[92px] overflow-hidden rounded-2xl p-3.5 sm:h-[104px] sm:p-5"
+    className="relative h-[88px] overflow-hidden rounded-2xl p-3 sm:h-[104px] sm:p-5"
     style={{
       background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)',
       backdropFilter: 'blur(16px)',
@@ -58,24 +58,24 @@ const SkeletonCard = ({ index }) => (
       />
     </div>
 
-    <div className="relative z-10 flex items-start justify-between gap-3">
-      <div className="min-w-0 flex-1 space-y-2">
+    <div className="relative z-10 flex items-start justify-between gap-1.5 sm:gap-2.5">
+      <div className="min-w-0 flex-1">
         <div
-          className="h-2 w-20 rounded animate-pulse"
+          className="h-1.5 sm:h-2 w-12 sm:w-20 rounded animate-pulse mb-1.5 sm:mb-2.5"
           style={{ background: 'rgba(255,255,255,0.15)' }}
         />
         <div
-          className="h-6 w-16 rounded animate-pulse"
+          className="h-4 sm:h-6 w-16 sm:w-24 rounded animate-pulse"
           style={{ background: 'rgba(255,255,255,0.2)', animationDelay: '0.1s' }}
         />
         <div
-          className="h-2 w-24 rounded animate-pulse"
+          className="h-2 w-20 sm:w-28 rounded animate-pulse mt-1.5 sm:mt-2.5"
           style={{ background: 'rgba(255,255,255,0.12)', animationDelay: '0.2s' }}
         />
       </div>
       <div
-        className="h-10 w-10 shrink-0 rounded-xl animate-pulse"
-        style={{ background: 'rgba(255,255,255,0.15)', animationDelay: '0.15s' }}
+        className="h-7 w-7 sm:h-10 sm:w-10 shrink-0 rounded-lg sm:rounded-xl animate-pulse bg-white/20"
+        style={{ animationDelay: '0.15s' }}
       />
     </div>
   </div>

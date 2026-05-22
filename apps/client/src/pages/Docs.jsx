@@ -54,7 +54,17 @@ function Docs({ user }) {
         className="grid gap-8"
       >
         <motion.header variants={fadeUp} className="max-w-3xl">
-          <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl md:text-5xl">
+          <h1
+            className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl"
+            style={{
+              background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'text-gradient-shift 5s linear infinite',
+            }}
+          >
             Use AI Proxy Bridge with Claude CLI
           </h1>
           <p className="mt-5 text-base font-medium leading-8 text-slate-300">
