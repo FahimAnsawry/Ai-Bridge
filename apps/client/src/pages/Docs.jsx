@@ -146,7 +146,7 @@ function Docs({ user }) {
       className="min-h-dvh overflow-x-hidden text-[--color-text-primary]"
       style={{
         background:
-          'radial-gradient(circle at 12% 12%, rgba(99, 102, 241, 0.24), transparent 30%), radial-gradient(circle at 86% 8%, rgba(168, 85, 247, 0.2), transparent 28%), linear-gradient(135deg, #161168 0%, #29237340%, #3E297A 70%, #522583 100%)',
+          'radial-gradient(circle at 12% 12%, rgba(99, 102, 241, 0.24), transparent 30%), radial-gradient(circle at 86% 8%, rgba(168, 85, 247, 0.2), transparent 28%), linear-gradient(135deg, #161168 0%, #292373 40%, #3E297A 70%, #522583 100%)',
       }}
     >
       <PublicNavbar />
