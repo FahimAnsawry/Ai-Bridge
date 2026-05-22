@@ -1101,7 +1101,17 @@ async function proxyRequest(req, res) {
           try {
             parsed = JSON.parse(rawBody);
           } catch (e) {
-            console.error('[proxy] Non-streaming /messages: upstream returned non-JSON body:', e.message);
+            // Log a compact snippet of the raw body so the provider's actual
+            // response (HTML error page, plain-text message, etc.) is visible.
+            const rawSnippet = String(rawBody || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 300);
+            console.error(
+              `[proxy] Non-streaming /messages: upstream (${providerName}) returned non-JSON body` +
+              ` [HTTP ${upstreamRes.status}] for model "${targetModel}".` +
+              (rawSnippet ? ` Raw: ${rawSnippet}` : ' (empty body)')
+            );
           }
 
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -1118,11 +1128,20 @@ async function proxyRequest(req, res) {
               finalBody = JSON.stringify(parsed);
             }
           } else {
+            // Build a user-facing message that includes a snippet of the raw
+            // upstream response so the cause is easier to diagnose.
+            const rawSnippet = String(rawBody || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 200);
+            const detailSuffix = rawSnippet
+              ? ` Provider "${providerName}" responded with: ${rawSnippet}`
+              : ` Provider "${providerName}" returned an empty body.`;
             finalBody = JSON.stringify({
               type: 'error',
               error: {
                 type: 'api_error',
-                message: 'Upstream returned a non-JSON response body.',
+                message: `Upstream returned a non-JSON response body.${detailSuffix}`,
               },
               usage: { input_tokens: 0, output_tokens: 0 },
             });
