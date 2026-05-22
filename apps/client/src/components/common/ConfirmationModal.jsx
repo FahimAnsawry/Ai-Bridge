@@ -10,13 +10,15 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
         >
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
+            initial={{ scale: 0.97, opacity: 0, y: 6 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.97, opacity: 0, y: 4 }}
+            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
             className="w-full max-w-sm rounded-2xl p-6 border"
             style={{
               background: 'linear-gradient(135deg, #0d1117 0%, #161b22 100%)',

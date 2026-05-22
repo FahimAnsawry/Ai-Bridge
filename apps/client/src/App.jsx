@@ -86,7 +86,6 @@ function AppLoading() {
 }
 
 function AppContent() {
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isModalWindowVisible, setIsModalWindowVisible] = useState(false);
   const { showToast } = useToast();
   const location = useLocation();
@@ -144,12 +143,6 @@ function AppContent() {
     }
   }, [showToast]);
 
-  useEffect(() => {
-    if (isModalWindowVisible) {
-      setMobileNavOpen(false);
-    }
-  }, [isModalWindowVisible]);
-
   // If auth is loading and we don't have a session hint, show the global loading screen
   if (loading && !hasSessionHint) {
     return <AppLoading />;
@@ -175,9 +168,6 @@ function AppContent() {
       {!isModalWindowVisible && (
         <Sidebar
           desktopWidth={SIDEBAR_WIDTH}
-          mobileOpen={mobileNavOpen}
-          onCloseMobile={() => setMobileNavOpen(false)}
-          onToggleMobile={() => setMobileNavOpen((value) => !value)}
           user={user}
         />
       )}

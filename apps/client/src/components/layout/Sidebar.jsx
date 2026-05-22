@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Settings,
@@ -23,32 +23,7 @@ const menuItems = [
   { name: 'Docs', icon: BookOpen, path: '/docs' },
 ];
 
-const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
-  useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === 'Escape') onCloseMobile();
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [onCloseMobile]);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-
-    const handleDocumentClick = () => {
-      onCloseMobile();
-    };
-
-    const timer = setTimeout(() => {
-      document.addEventListener('click', handleDocumentClick);
-    }, 0);
-
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', handleDocumentClick);
-    };
-  }, [mobileOpen, onCloseMobile]);
-
+const Sidebar = () => {
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.035, delayChildren: 0.04 } },
@@ -61,56 +36,13 @@ const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
 
   return (
     <>
-      {!mobileOpen && (
-        <div
-          className="fixed left-4 top-4 z-[60] hidden md:block lg:hidden"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onToggleMobile();
-          }}
-        >
-          <button
-            className="group flex h-11 w-11 items-center justify-center rounded-2xl transition-all active:scale-95"
-            style={{
-              background: SIDEBAR_RAIL_BG,
-              border: '1px solid rgba(139,152,255,0.28)',
-              color: '#D9DFFF',
-              boxShadow: '0 18px 38px rgba(5,8,44,0.48), inset 0 1px 0 rgba(255,255,255,0.12)',
-            }}
-            aria-label="Toggle menu"
-          >
-            <div className="flex flex-col gap-1.5 justify-center items-start w-5 h-5">
-              <span className="block h-[2px] w-5 rounded-full bg-current transition-all duration-300 ease-out" />
-              <span className="block h-[2px] w-3 rounded-full bg-current transition-all duration-300 ease-out group-hover:w-5" />
-              <span className="block h-[2px] w-4.5 rounded-full bg-current transition-all duration-300 ease-out group-hover:w-5" />
-            </div>
-          </button>
-        </div>
-      )}
-
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onCloseMobile}
-            className="fixed inset-0 z-30 hidden md:block lg:hidden"
-            style={{ background: 'rgba(3,6,34,0.72)', backdropFilter: 'blur(7px)' }}
-          />
-        )}
-      </AnimatePresence>
-
       <motion.aside
         initial={false}
         animate={{ width: SIDEBAR_WIDTH }}
         style={{ background: 'transparent' }}
         className={[
-          'fixed inset-y-0 left-0 z-40 hidden md:flex h-dvh shrink-0 flex-col items-center overflow-hidden lg:sticky lg:top-0',
+          'sticky top-0 inset-y-0 left-0 z-40 hidden md:flex h-dvh shrink-0 flex-col items-center overflow-hidden',
           'px-0 py-0',
-          'transition-transform duration-300 ease-out',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
       >
         <div
@@ -145,7 +77,6 @@ const Sidebar = ({ mobileOpen, onCloseMobile, onToggleMobile }) => {
             >
               <NavLink
                 to={path}
-                onClick={onCloseMobile}
                 aria-label={name}
                 title={name}
                 className="block"

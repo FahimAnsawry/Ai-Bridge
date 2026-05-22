@@ -67,24 +67,24 @@ const StatCard = ({ title, value, icon: Icon, subtitle, theme, delay = 0 }) => {
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, delay, ease: [0.23, 1, 0.32, 1] }}
-      className="relative h-[88px] overflow-hidden rounded-2xl p-3 cursor-default sm:h-[104px] sm:p-5"
+      className="relative h-[100px] overflow-hidden rounded-2xl p-4 cursor-default sm:h-[104px] sm:p-5"
       style={{ background: theme.gradient, boxShadow: `0 8px 32px ${theme.glow}` }}
     >
       {/* inner shine */}
       <div className="absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 60%)' }} />
 
-      <div className="relative z-10 flex items-start justify-between gap-1.5 sm:gap-2.5">
+      <div className="relative z-10 flex items-start justify-between gap-2 sm:gap-2.5">
         <div className="min-w-0 flex-1">
-          <p className="text-[8px] sm:text-[10px] font-bold uppercase tracking-[0.14em] mb-1 sm:mb-2 text-white/70 truncate">{title}</p>
+          <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.14em] mb-1 sm:mb-2 text-white/70 truncate">{title}</p>
           <p className={`font-black truncate leading-none text-white ${
             isLongValue 
-              ? 'text-[11px] sm:text-base md:text-lg lg:text-xl' 
-              : 'text-base sm:text-2xl'
+              ? 'text-sm sm:text-base md:text-lg lg:text-xl' 
+              : 'text-xl sm:text-2xl'
           }`}>{value}</p>
-          {subtitle && <p className="mt-0.5 sm:mt-1.5 text-[9px] sm:text-xs font-medium truncate text-white/60">{subtitle}</p>}
+          {subtitle && <p className="mt-1 sm:mt-1.5 text-[11px] sm:text-xs font-medium truncate text-white/60">{subtitle}</p>}
         </div>
-        <div className="flex h-7 w-7 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-white/20">
-          <Icon size={14} className="text-white sm:w-[18px] sm:h-[18px]" />
+        <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-white/20">
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
         </div>
       </div>
     </motion.div>

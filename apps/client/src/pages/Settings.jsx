@@ -1267,8 +1267,8 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
 
       <AnimatePresence>
         {isAddModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.addProvider}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: 'easeOut' }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.97, opacity: 0, y: 8 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 4 }} transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }} className="relative w-full max-w-md overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.addProvider}>
               <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(56,189,248,0.20) 0%, rgba(255,255,255,0.05) 34%, rgba(255,255,255,0) 64%)' }} />
               <div className="relative z-10 flex items-center justify-between gap-4 shrink-0 border-b border-white/15 pb-4">
                 <div>
@@ -1306,8 +1306,8 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
           const p = form.providers.find(x => x.id === editingProviderId);
           if (!p) return null;
           return (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative w-full max-w-lg overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.editProvider}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: 'easeOut' }} className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.97, opacity: 0, y: 8 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 4 }} transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }} className="relative w-full max-w-lg overflow-hidden rounded-2xl p-6 space-y-6 max-h-[90vh] flex flex-col" style={SETTINGS_CARD_THEMES.editProvider}>
               <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.18) 0%, rgba(255,255,255,0.04) 32%, rgba(255,255,255,0) 62%)' }} />
               <div className="relative z-10 flex items-center justify-between gap-4 shrink-0 border-b border-white/15 pb-4">
                 <div className="min-w-0">
@@ -1373,8 +1373,8 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
           const providerRoutes = Object.entries(getModelRouting()).filter(([_, routeValue]) => routeIncludesProvider(routeValue, provider.id));
 
           return (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-stretch justify-center p-2 bg-slate-950/80 backdrop-blur-md sm:items-center sm:p-4">
-              <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} className="relative flex h-[calc(100dvh-1rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden rounded-2xl p-3 sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:min-h-[min(680px,calc(100vh-2rem))] sm:p-6" style={SETTINGS_CARD_THEMES.activeModel}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: 'easeOut' }} className="fixed inset-0 z-[110] flex items-stretch justify-center p-2 bg-slate-950/80 backdrop-blur-md sm:items-center sm:p-4">
+              <motion.div initial={{ scale: 0.97, opacity: 0, y: 8 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 4 }} transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }} className="relative flex h-[calc(100dvh-1rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden rounded-2xl p-3 sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:min-h-[min(680px,calc(100vh-2rem))] sm:p-6" style={SETTINGS_CARD_THEMES.activeModel}>
                 <div className="pointer-events-none absolute inset-0 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 58%)' }} />
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-5">
                 <div className="flex items-start justify-between gap-4 shrink-0">
