@@ -279,6 +279,16 @@ const Chat = ({ user }) => {
         return;
       }
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!/event-stream|application\/json/i.test(contentType)) {
+        const errBody = await res.text().catch(() => '');
+        replaceWithError(
+          `Unexpected response (content-type: ${contentType || 'unknown'}). The dev proxy may not be routing /v1 to the backend. ` +
+            (errBody ? `Body: ${errBody.slice(0, 200)}` : '')
+        );
+        return;
+      }
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -410,6 +420,15 @@ const Chat = ({ user }) => {
           parsed = obj?.error?.message || obj?.error || obj?.message || errBody;
         } catch {}
         replaceWithError(`HTTP ${res.status}: ${parsed || res.statusText}`);
+        return;
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!/event-stream|application\/json/i.test(contentType)) {
+        const errBody = await res.text().catch(() => '');
+        replaceWithError(
+          `Unexpected response (content-type: ${contentType || 'unknown'}). The dev proxy may not be routing /v1 to the backend. ` +
+            (errBody ? `Body: ${errBody.slice(0, 200)}` : '')
+        );
         return;
       }
       const reader = res.body.getReader();
