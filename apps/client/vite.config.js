@@ -21,7 +21,8 @@ const sendBackendUnavailable = (res, req, err) => {
     requestPath.startsWith('/health') ||
     requestPath.startsWith('/api') ||
     requestPath.startsWith('/auth') ||
-    requestPath.startsWith('/copilot');
+    requestPath.startsWith('/copilot') ||
+    requestPath.startsWith('/v1');
 
   if (!isHttpApiRequest) {
     res.statusCode = 502;
@@ -116,6 +117,14 @@ export default defineConfig({
       '/copilot': {
         target: backendTarget,
         changeOrigin: true,
+        configure: configureProxy,
+      },
+      '/v1': {
+        target: backendTarget,
+        changeOrigin: true,
+        // Streaming/SSE responses must not time out at the proxy.
+        proxyTimeout: 10 * 60 * 1000,
+        timeout: 10 * 60 * 1000,
         configure: configureProxy,
       },
       '/socket.io': {
