@@ -9,6 +9,7 @@ import Overview from './pages/Overview';
 import Settings from './pages/Settings';
 import Logs from './pages/Logs';
 import Models from './pages/Models';
+import Chat from './pages/Chat';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import About from './pages/About';
@@ -89,6 +90,7 @@ function AppContent() {
   const mainRef = useRef(null);
   const isSettingsPage = location.pathname === '/settings';
   const isDashboardPage = location.pathname === '/dashboard';
+  const isChatPage = location.pathname === '/chat';
 
   const [hasSessionHint, setHasSessionHint] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -146,7 +148,7 @@ function AppContent() {
     }
   }, [showToast]);
 
-  const PROTECTED_PATH_RE = /^\/(dashboard|settings|logs|models)/;
+  const PROTECTED_PATH_RE = /^\/(dashboard|settings|logs|models|chat)/;
   const isProtectedPath = PROTECTED_PATH_RE.test(location.pathname);
 
   // If auth is loading and we don't have a session hint, show the global loading screen.
@@ -179,11 +181,12 @@ function AppContent() {
         />
       )}
 
-      <main ref={mainRef} className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-6 sm:px-8 sm:pt-6 md:pb-12 lg:pt-6 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'lg:overflow-hidden overflow-y-auto' : 'overflow-y-auto'}`}>
-        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'lg:h-full lg:min-h-0 lg:overflow-hidden' : ''}`}>
+      <main ref={mainRef} className={`relative z-10 flex-1 min-w-0 min-h-0 px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-6 sm:px-8 sm:pt-6 md:pb-12 lg:pt-6 transition-all duration-300 ${isSettingsPage ? 'overflow-y-auto' : isDashboardPage ? 'lg:overflow-hidden overflow-y-auto' : isChatPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className={`mx-auto w-full max-w-[92rem] ${isDashboardPage ? 'lg:h-full lg:min-h-0 lg:overflow-hidden' : ''} ${isChatPage ? 'h-full min-h-0' : ''}`}>
           <Routes>
             <Route path='/' element={<Navigate to="/dashboard" replace />} />
 <Route path='/dashboard' element={<Overview user={user} />} />
+            <Route path='/chat' element={<Chat user={user} />} />
             <Route path='/settings' element={<Settings user={user} onModalVisibilityChange={setIsModalWindowVisible} />} />
             <Route path='/logs' element={<Logs user={user} onModalVisibilityChange={setIsModalWindowVisible} />} />
             <Route path='/models' element={<Models user={user} />} />

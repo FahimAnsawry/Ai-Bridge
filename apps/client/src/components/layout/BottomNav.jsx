@@ -9,6 +9,7 @@ import {
   LogOut,
   MoreHorizontal,
   X,
+  MessageSquare,
 } from 'lucide-react';
 
 const NAV_BG = 'linear-gradient(180deg, rgba(36,44,116,0.92) 0%, rgba(31,36,100,0.94) 50%, rgba(33,31,106,0.95) 100%)';
@@ -18,12 +19,13 @@ const ACTIVE_BG = 'linear-gradient(180deg, rgba(77,89,127,0.64), rgba(58,66,111,
 
 const primaryItems = [
   { name: 'Overview', icon: LayoutDashboard, path: '/dashboard' },
+  { name: 'Chat', icon: MessageSquare, path: '/chat' },
   { name: 'Settings', icon: Settings, path: '/settings' },
   { name: 'Logs', icon: FileText, path: '/logs' },
-  { name: 'Models', icon: Boxes, path: '/models' },
 ];
 
 const moreItems = [
+  { name: 'Models', icon: Boxes, path: '/models', type: 'link' },
   { name: 'Docs', icon: BookOpen, path: '/docs', type: 'link' },
   { name: 'Logout', icon: LogOut, href: '/auth/logout', type: 'action', tone: 'danger' },
 ];

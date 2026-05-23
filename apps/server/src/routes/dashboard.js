@@ -46,7 +46,11 @@ function createDashboardRouter(runtime) {
 
   router.get('/status', async (req, res) => {
     try {
-      res.json(await adminService.getStatus(req.user._id));
+      const status = await adminService.getStatus(req.user._id);
+      if (req.user?.accessKey) {
+        status.accessKey = req.user.accessKey;
+      }
+      res.json(status);
     } catch (error) {
       console.error('[status] Failed:', error.message);
       res.status(500).json({ error: error.message || 'Failed to get status.' });

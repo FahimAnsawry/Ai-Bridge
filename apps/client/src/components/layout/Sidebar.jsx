@@ -8,6 +8,7 @@ import {
   FileText,
   BookOpen,
   LogOut,
+  MessageSquare,
 } from 'lucide-react';
 
 const SIDEBAR_WIDTH = 96;
@@ -17,6 +18,7 @@ const SIDEBAR_ACTIVE_BG = 'linear-gradient(180deg, rgba(77,89,127,0.64), rgba(58
 
 const menuItems = [
   { name: 'Overview', icon: LayoutDashboard, path: '/dashboard' },
+  { name: 'Chat', icon: MessageSquare, path: '/chat' },
   { name: 'Settings', icon: Settings, path: '/settings' },
   { name: 'Logs', icon: FileText, path: '/logs' },
   { name: 'Models', icon: Boxes, path: '/models' },

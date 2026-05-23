@@ -14,6 +14,7 @@ const { mongoose } = require('./config/db');
 
 const { attachSocketIO, morganStream } = require('./middleware/logger');
 const createDashboardRouter = require('./routes/dashboard');
+const createChatRouter = require('./routes/chat');
 const copilotRouter = require('./routes/copilot');
 const v1Router = require('./routes/v1');
 const { createProxyRuntime } = require('./services/proxy-runtime');
@@ -166,6 +167,7 @@ function createWebServer(options = {}) {
 
   // Protected Dashboard API
   app.use('/api', requireAuth, createDashboardRouter(runtime));
+  app.use('/api/chat', requireAuth, createChatRouter());
 
   // GitHub Copilot Proxy — always mounted (auth handled internally)
   app.use('/copilot', copilotRouter);

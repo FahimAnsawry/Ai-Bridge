@@ -123,6 +123,34 @@ export async function regenerateAccessKey() {
   }));
 }
 
+// ── Chat thread persistence ───────────────────────────────────────────────────
+
+/** GET /api/chat/messages */
+export async function fetchChatMessages() {
+  return handleResponse(await fetch(`${BASE}/chat/messages`));
+}
+
+/** POST /api/chat/messages */
+export async function appendChatMessage({ role, content, model }) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content, model }),
+    })
+  );
+}
+
+/** DELETE /api/chat/messages */
+export async function clearChatMessages() {
+  return handleResponse(await fetch(`${BASE}/chat/messages`, { method: 'DELETE' }));
+}
+
+/** DELETE /api/chat/messages/:id */
+export async function deleteChatMessage(id) {
+  return handleResponse(await fetch(`${BASE}/chat/messages/${id}`, { method: 'DELETE' }));
+}
+
 // ── GitHub Copilot Auth API ───────────────────────────────────────────────────
 
 /** GET /copilot/auth/status */

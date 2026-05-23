@@ -7,4 +7,6 @@ export const queryKeys = {
   copilotAuthStatus: () => ['copilot', 'auth', 'status'],
   adminUsers: () => ['admin', 'users'],
   adminStats: () => ['admin', 'stats'],
+  chatMessages: () => ['chat', 'messages'],
+  models: () => ['dashboard', 'models'],
 };
