@@ -19,8 +19,13 @@ import MessageList from '../components/chat/MessageList';
 import ConfirmationModal from '../components/common/ConfirmationModal';
 
 const MODEL_STORAGE_KEY = 'ai-bridge.chat.model';
+const ANTHROPIC_MAX_TOKENS = 8192;
 
-function parseSseChunk(buffer, onDelta) {
+function isClaudeModel(id) {
+  return typeof id === 'string' && /^claude[-_.]/i.test(id);
+}
+
+function parseOpenAiSseChunk(buffer, onDelta) {
   // Returns the leftover (incomplete) buffer.
   const lines = buffer.split('\n');
   const leftover = lines.pop();
@@ -38,6 +43,53 @@ function parseSseChunk(buffer, onDelta) {
     }
   }
   return leftover || '';
+}
+
+function parseAnthropicSseChunk(buffer, onDelta) {
+  // Anthropic SSE: `event: <name>\ndata: <json>\n\n`. We only need data lines —
+  // `content_block_delta` events carry `delta.text` for text streaming.
+  const lines = buffer.split('\n');
+  const leftover = lines.pop();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) continue;
+    try {
+      const json = JSON.parse(payload);
+      if (json?.type === 'content_block_delta') {
+        const text = json?.delta?.text;
+        if (typeof text === 'string') onDelta(text);
+      } else if (json?.type === 'error') {
+        const msg = json?.error?.message || 'Upstream returned an error.';
+        onDelta(`\n\n[error: ${msg}]`);
+      }
+    } catch {
+      // ignore malformed event
+    }
+  }
+  return leftover || '';
+}
+
+function buildAnthropicMessages(messagesForModel) {
+  // Anthropic requires strictly alternating user/assistant turns.
+  // Our local state may have consecutive same-role messages after a regenerate
+  // edge case; collapse defensively.
+  const out = [];
+  for (const m of messagesForModel) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+    const text = typeof m.content === 'string' ? m.content : '';
+    if (!text) continue;
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) {
+      last.content += `\n\n${text}`;
+    } else {
+      out.push({ role: m.role, content: text });
+    }
+  }
+  // Anthropic also requires the first message to be from the user.
+  while (out.length && out[0].role !== 'user') out.shift();
+  return out;
 }
 
 const Chat = ({ user }) => {
@@ -190,17 +242,29 @@ const Chat = ({ user }) => {
     let accumulated = '';
 
     try {
-      const res = await fetch('/v1/chat/completions', {
+      const isClaude = isClaudeModel(selectedModel);
+      const url = isClaude ? '/v1/messages' : '/v1/chat/completions';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessKey}`,
+      };
+      if (isClaude) headers['anthropic-version'] = '2023-06-01';
+
+      const body = isClaude
+        ? {
+            model: selectedModel,
+            max_tokens: ANTHROPIC_MAX_TOKENS,
+            stream: true,
+            messages: buildAnthropicMessages(snapshot),
+          }
+        : { model: selectedModel, stream: true, messages: snapshot };
+
+      const parser = isClaude ? parseAnthropicSseChunk : parseOpenAiSseChunk;
+
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessKey}`,
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          stream: true,
-          messages: snapshot,
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: ac.signal,
       });
 
@@ -222,7 +286,7 @@ const Chat = ({ user }) => {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        buffer = parseSseChunk(buffer, (delta) => {
+        buffer = parser(buffer, (delta) => {
           accumulated += delta;
           setLocalMessages((prev) => {
             const copy = [...prev];
@@ -313,18 +377,39 @@ const Chat = ({ user }) => {
     abortRef.current = ac;
     let accumulated = '';
     try {
-      const res = await fetch('/v1/chat/completions', {
+      const isClaude = isClaudeModel(selectedModel);
+      const url = isClaude ? '/v1/messages' : '/v1/chat/completions';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessKey}`,
+      };
+      if (isClaude) headers['anthropic-version'] = '2023-06-01';
+
+      const body = isClaude
+        ? {
+            model: selectedModel,
+            max_tokens: ANTHROPIC_MAX_TOKENS,
+            stream: true,
+            messages: buildAnthropicMessages(snapshot),
+          }
+        : { model: selectedModel, stream: true, messages: snapshot };
+
+      const parser = isClaude ? parseAnthropicSseChunk : parseOpenAiSseChunk;
+
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessKey}`,
-        },
-        body: JSON.stringify({ model: selectedModel, stream: true, messages: snapshot }),
+        headers,
+        body: JSON.stringify(body),
         signal: ac.signal,
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        replaceWithError(`HTTP ${res.status}: ${errBody || res.statusText}`);
+        let parsed = errBody;
+        try {
+          const obj = JSON.parse(errBody);
+          parsed = obj?.error?.message || obj?.error || obj?.message || errBody;
+        } catch {}
+        replaceWithError(`HTTP ${res.status}: ${parsed || res.statusText}`);
         return;
       }
       const reader = res.body.getReader();
@@ -334,7 +419,7 @@ const Chat = ({ user }) => {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        buffer = parseSseChunk(buffer, (delta) => {
+        buffer = parser(buffer, (delta) => {
           accumulated += delta;
           setLocalMessages((prev) => {
             const copy = [...prev];
