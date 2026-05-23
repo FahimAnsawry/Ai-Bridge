@@ -44,7 +44,10 @@ const DEFAULT_MODELS = [
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
   { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
-  { id: 'gpt-5.5', name: 'GPT-5.5' }
+  { id: 'gpt-5.5', name: 'GPT-5.5' },
+  { id: 'openai/gpt-5.5', name: 'OpenAI GPT-5.5' },
+  { id: 'gemini/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+  { id: 'glm-5-thinking', name: 'GLM 5 Thinking' }
 ];
 
 const GLASS_STYLE = {
