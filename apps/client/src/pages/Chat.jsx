@@ -78,22 +78,38 @@ const Chat = ({ user }) => {
   });
 
   const accessKey = statusQuery.data?.accessKey || user?.accessKey || '';
-  const models = useMemo(() => modelsQuery.data?.data || [], [modelsQuery.data]);
+
+  // Source the model list from Settings → Model Routing (the models the user has actually
+  // configured to route). Fall back to the synced /api/models catalog if routing is empty.
+  const models = useMemo(() => {
+    const routing = configQuery.data?.model_routing;
+    if (routing && typeof routing === 'object' && !Array.isArray(routing)) {
+      const ids = Object.keys(routing).filter((id) => id && id.trim());
+      if (ids.length) {
+        return ids
+          .sort((a, b) => a.localeCompare(b))
+          .map((id) => ({ id }));
+      }
+    }
+    return modelsQuery.data?.data || [];
+  }, [configQuery.data, modelsQuery.data]);
 
   // Seed local state from server history once loaded.
   useEffect(() => {
     if (historyQuery.data) setLocalMessages(historyQuery.data);
   }, [historyQuery.data]);
 
-  // Pick a default model: localStorage > active_model_id from config > first available.
+  // Pick a default model: localStorage value if still valid > active_model_id from config > first available.
   useEffect(() => {
-    if (selectedModel) return;
+    if (!models.length) return;
+    const valid = new Set(models.map((m) => m.id));
+    if (selectedModel && valid.has(selectedModel)) return;
     const activeId = configQuery.data?.active_model_id;
-    if (activeId) {
+    if (activeId && valid.has(activeId)) {
       setSelectedModel(activeId);
       return;
     }
-    if (models.length) setSelectedModel(models[0].id);
+    setSelectedModel(models[0].id);
   }, [selectedModel, configQuery.data, models]);
 
   useEffect(() => {
@@ -368,7 +384,7 @@ const Chat = ({ user }) => {
   };
 
   const isHistoryLoading = historyQuery.isPending;
-  const isModelsLoading = modelsQuery.isPending;
+  const isModelsLoading = configQuery.isPending && modelsQuery.isPending;
 
   return (
     <motion.div
