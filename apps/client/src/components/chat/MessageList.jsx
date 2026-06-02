@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 
-const MessageList = ({ messages, streaming, onRegenerate, onRetry, emptyState }) => {
+const MessageList = ({ messages, streaming, onRegenerate, onRetry, onEdit, onDelete, emptyState }) => {
   const scrollRef = useRef(null);
   const stuckRef = useRef(true);
 
@@ -51,6 +51,8 @@ const MessageList = ({ messages, streaming, onRegenerate, onRetry, emptyState })
               streaming={isStreaming}
               onRegenerate={isLastAssistant && !streaming ? onRegenerate : null}
               onRetry={m.role === 'error' ? onRetry : null}
+              onEdit={onEdit}
+              onDelete={onDelete}
             />
           );
         })}

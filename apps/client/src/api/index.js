@@ -125,25 +125,77 @@ export async function regenerateAccessKey() {
 
 // ── Chat thread persistence ───────────────────────────────────────────────────
 
-/** GET /api/chat/messages */
-export async function fetchChatMessages() {
-  return handleResponse(await fetch(`${BASE}/chat/messages`));
+/** GET /api/chat/threads */
+export async function fetchChatThreads() {
+  return handleResponse(await fetch(`${BASE}/chat/threads`));
 }
 
-/** POST /api/chat/messages */
-export async function appendChatMessage({ role, content, model }) {
+/** POST /api/chat/threads — create a new thread */
+export async function createChatThread({ name, model }) {
   return handleResponse(
-    await fetch(`${BASE}/chat/messages`, {
+    await fetch(`${BASE}/chat/threads`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, content, model }),
+      body: JSON.stringify({ name, model }),
     })
   );
 }
 
-/** DELETE /api/chat/messages */
-export async function clearChatMessages() {
-  return handleResponse(await fetch(`${BASE}/chat/messages`, { method: 'DELETE' }));
+/** PUT /api/chat/threads/:id — rename / change model */
+export async function updateChatThread(id, { name, model }) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/threads/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, model }),
+    })
+  );
+}
+
+/** DELETE /api/chat/threads/:id */
+export async function deleteChatThread(id) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/threads/${id}`, { method: 'DELETE' })
+  );
+}
+
+/** GET /api/chat/messages?threadId= */
+export async function fetchChatMessages({ threadId } = {}) {
+  const params = threadId ? `?threadId=${threadId}` : '';
+  return handleResponse(await fetch(`${BASE}/chat/messages${params}`));
+}
+
+/** POST /api/chat/messages — append { role, content, model, threadId } */
+export async function appendChatMessage({ role, content, model, threadId }) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content, model, threadId }),
+    })
+  );
+}
+
+/** PATCH /api/chat/messages/:id — edit a user message */
+export async function editChatMessage(id, { content }) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/messages/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+  );
+}
+
+/** DELETE /api/chat/messages — clear with optional threadId body */
+export async function clearChatMessages({ threadId } = {}) {
+  return handleResponse(
+    await fetch(`${BASE}/chat/messages`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(threadId ? { threadId } : {}),
+    })
+  );
 }
 
 /** DELETE /api/chat/messages/:id */
