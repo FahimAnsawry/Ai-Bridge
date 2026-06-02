@@ -1508,7 +1508,31 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                           setIsModelDropdownOpen(true);
                           setModelSearchQuery('');
                         }}
-                        placeholder="Select or search a model..."
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && modelSearchQuery.trim()) {
+                            const trimmed = modelSearchQuery.trim();
+                            const exactMatch = availableModels.find(
+                              m => m.id.toLowerCase() === trimmed.toLowerCase()
+                            );
+                            if (exactMatch) {
+                              updateModelRouteProvider(exactMatch.id, provider.id);
+                            } else {
+                              // Add as custom model
+                              const newModel = { id: trimmed, name: trimmed };
+                              setAvailableModels(prev =>
+                                prev.find(m => m.id === trimmed) ? prev : [...prev, newModel]
+                              );
+                              updateModelRouteProvider(trimmed, provider.id);
+                              showToast(`Custom model "${trimmed}" added to route.`, 'success');
+                            }
+                            setIsModelDropdownOpen(false);
+                            setModelSearchQuery('');
+                            e.preventDefault();
+                          } else if (e.key === 'Escape') {
+                            setIsModelDropdownOpen(false);
+                          }
+                        }}
+                        placeholder="Search or type a custom model ID..."
                         className={`${FIELD_CLASS} rounded-lg px-3 py-2 text-[11px] font-mono placeholder:text-white/68`}
                       />
                       <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-100">
@@ -1523,25 +1547,59 @@ const Settings = ({ user: initialUser, onModalVisibilityChange }) => {
                             className="absolute left-0 right-0 top-full z-[100] mt-1 max-h-48 overflow-y-auto rounded-xl border border-cyan-200/35 p-1.5 shadow-[0_18px_44px_rgba(8,47,73,0.42)] custom-scrollbar"
                             style={{ background: 'linear-gradient(135deg, rgba(8,47,73,0.98) 0%, rgba(13,78,83,0.98) 52%, rgba(15,23,42,0.98) 100%)' }}
                           >
-                            {availableModels
-                              .filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
-                              .map((m) => (
-                                <div
-                                  key={m.id}
-                                  onClick={() => {
-                                    updateModelRouteProvider(m.id, provider.id);
-                                    setIsModelDropdownOpen(false);
-                                    setModelSearchQuery('');
-                                  }}
-                                  className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left font-mono text-[11px] font-semibold text-white hover:bg-cyan-100/14 cursor-pointer transition-colors"
-                                >
-                                  <span className="truncate">{m.name || m.id}</span>
-                                  <span className="truncate text-[10px] text-cyan-100/78">{m.id}</span>
-                                </div>
-                              ))}
-                            {availableModels.filter(m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
-                              <div className="px-3 py-4 text-center font-mono text-[11px] font-semibold text-cyan-50/82">No models found</div>
-                            )}
+                            {(() => {
+                              const filtered = availableModels.filter(
+                                m => (m.name || '').toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                     m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
+                              );
+                              const trimmedQuery = modelSearchQuery.trim();
+                              const isExactMatch = availableModels.some(
+                                m => m.id.toLowerCase() === trimmedQuery.toLowerCase()
+                              );
+                              const showAddCustom = trimmedQuery && !isExactMatch;
+
+                              return (
+                                <>
+                                  {filtered.map((m) => (
+                                    <div
+                                      key={m.id}
+                                      onClick={() => {
+                                        updateModelRouteProvider(m.id, provider.id);
+                                        setIsModelDropdownOpen(false);
+                                        setModelSearchQuery('');
+                                      }}
+                                      className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left font-mono text-[11px] font-semibold text-white hover:bg-cyan-100/14 cursor-pointer transition-colors"
+                                    >
+                                      <span className="truncate">{m.name || m.id}</span>
+                                      <span className="truncate text-[10px] text-cyan-100/78">{m.id}</span>
+                                    </div>
+                                  ))}
+                                  {filtered.length === 0 && !showAddCustom && (
+                                    <div className="px-3 py-4 text-center font-mono text-[11px] font-semibold text-cyan-50/82">No models found</div>
+                                  )}
+                                  {showAddCustom && (
+                                    <div
+                                      onClick={() => {
+                                        const newModel = { id: trimmedQuery, name: trimmedQuery };
+                                        setAvailableModels(prev =>
+                                          prev.find(m => m.id === trimmedQuery) ? prev : [...prev, newModel]
+                                        );
+                                        updateModelRouteProvider(trimmedQuery, provider.id);
+                                        showToast(`Custom model "${trimmedQuery}" added to route.`, 'success');
+                                        setIsModelDropdownOpen(false);
+                                        setModelSearchQuery('');
+                                      }}
+                                      className="flex items-center gap-2.5 rounded-lg border border-dashed border-cyan-400/40 bg-cyan-500/10 px-3 py-2.5 font-mono text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-300/60 cursor-pointer transition-all mt-1"
+                                    >
+                                      <Plus size={13} className="shrink-0 text-cyan-300" />
+                                      <span className="truncate">
+                                        Add &ldquo;<span className="text-white">{trimmedQuery}</span>&rdquo; as custom model
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </motion.div>
                         )}
                       </AnimatePresence>
