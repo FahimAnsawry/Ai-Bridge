@@ -3,6 +3,7 @@ export const STATIC_MODELS = [
   { id: 'gpt-5.4-mini', owned_by: 'openai' },
   { id: 'gpt-5.3-codex', owned_by: 'openai' },
   { id: 'claude-opus-4.6', owned_by: 'anthropic' },
+  { id: 'claude-opus-4.8', owned_by: 'anthropic' },
   { id: 'claude-sonnet-4.6', owned_by: 'anthropic' },
   { id: 'moonshotai/kimi-k2.6', owned_by: 'moonshot' },
   { id: 'deepseek-ai/deepseek-v4-pro', owned_by: 'deepseek' },

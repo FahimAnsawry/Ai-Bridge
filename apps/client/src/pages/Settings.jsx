@@ -22,6 +22,7 @@ const DEFAULT_MODELS = [
   { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4-6' },
   { id: 'claude-opus-4-7', name: 'Claude Opus 4-7' },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4-8' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4-6' },
   { id: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
   { id: 'deepseek-ai/deepseek-v4-pro', name: 'Deepseek-ai/Deepseek-v4-pro' },

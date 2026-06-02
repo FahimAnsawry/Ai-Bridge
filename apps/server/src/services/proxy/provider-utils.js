@@ -5,6 +5,7 @@ const TIMY_SUPPORTED_MODELS = [
   'claude-sonnet-4-6',
   'claude-opus-4-6',
   'claude-opus-4-7',
+  'claude-opus-4-8',
 ];
 
 function isTimyProvider(providerOrBaseUrl) {
@@ -19,7 +20,8 @@ function normalizeTimyModel(model) {
   return model
     .replace(/^claude-sonnet-4\.6$/i, 'claude-sonnet-4-6')
     .replace(/^claude-opus-4\.6$/i, 'claude-opus-4-6')
-    .replace(/^claude-opus-4\.7$/i, 'claude-opus-4-7');
+    .replace(/^claude-opus-4\.7$/i, 'claude-opus-4-7')
+    .replace(/^claude-opus-4\.8$/i, 'claude-opus-4-8');
 }
 
 function getTimyUnsupportedModelMessage(model) {

@@ -107,6 +107,11 @@ function normalizeClaudeModelAlias(model) {
     return 'claude-opus-4-7';
   }
 
+  // Claude Code /model → Opus 4.8: claude-opus-4.8, claude-opus-4-8, claude-opus-4-8-20250514
+  if (/^claude-opus-4[-.]8(?:-\d{8})?$/i.test(normalized)) {
+    return 'claude-opus-4-8';
+  }
+
   return model;
 }
 

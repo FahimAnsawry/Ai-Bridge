@@ -34,6 +34,7 @@ const ANTHROPIC_MODELS = [
   'claude-3.7-sonnet',
   'claude-sonnet-4',
   'claude-opus-4',
+  'claude-opus-4-8',
 ];
 
 // ── Model routing helpers ──────────────────────────────────────────────────────

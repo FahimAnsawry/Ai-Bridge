@@ -44,6 +44,7 @@ const MODELS = [
   // Anthropic
   { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', owned_by: 'anthropic' },
   { id: 'claude-opus-4.7', name: 'Claude Opus 4.7', owned_by: 'anthropic' },
+  { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', owned_by: 'anthropic' },
   { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', owned_by: 'anthropic' },
   // Google
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', owned_by: 'google' },
