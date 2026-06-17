@@ -47,8 +47,6 @@ const {
 const {
   tryParseToolCallsFromJsonText,
   translateOpenAIToAnthropic,
-  extractOpenAIChoiceReasoning,
-  extractOpenAIChoiceText,
   AnthropicSSETranslator,
 } = require('./proxy/anthropic-translation');
 const {
@@ -779,8 +777,6 @@ async function proxyRequest(req, res) {
     const upstreamRes = await axios(axiosConfig);
     timing.upstreamHeadersMs = Date.now() - upstreamStart;
 
-    // console.log(`[proxy] ← ${upstreamRes.status} ${upstreamRes.headers['content-type'] || 'unknown'}`);
-
     // Debug: capture and log non-2xx body from upstream
     if (upstreamRes.status >= 400) {
       const chunks = [];
@@ -798,7 +794,6 @@ async function proxyRequest(req, res) {
       console.warn(`[proxy] FreeModel error: ${upstreamRes.status}`);
     }
 
-
     // ── Detect request type ───────────────────────────────────────────────
     const isChatCompletions = req.path.includes('/chat/completions');
     const isMessages = req.path.includes('/messages');
@@ -810,7 +805,21 @@ async function proxyRequest(req, res) {
     // 1. Not streaming
     // 2. It's a non-completion route (e.g. /models)
     // 3. It IS a /messages route but we might need to translate (buffer to translate)
-    const shouldBuffer = !isStreaming;
+    let shouldBuffer = !isStreaming;
+
+    // Check if upstream returned non-streaming response when we expected streaming
+    // Some providers (e.g., composer-2.5-fast on newapi.makelove.cloud) don't support
+    // streaming and return a complete JSON response even when stream=true is requested
+    const upstreamContentType = upstreamRes.headers['content-type'] || '';
+    const expectedStreaming = isStreaming;
+    const upstreamReturnedStreaming = upstreamContentType.includes('text/event-stream') ||
+      upstreamContentType.includes('text/plain') ||
+      upstreamContentType.includes('application/x-ndjson');
+    if (expectedStreaming && !upstreamReturnedStreaming && upstreamContentType.includes('application/json')) {
+      console.warn(`[proxy] Upstream returned non-streaming response (${upstreamContentType}) when streaming was expected; switching to buffer mode and converting to SSE`);
+      shouldBuffer = true;
+      req.__convertToSSE = true;
+    }
 
     if (!shouldBuffer) {
       res.status(upstreamRes.status);
@@ -956,8 +965,8 @@ async function proxyRequest(req, res) {
 
                   // OpenAI-format translation
                   const choice = obj.choices?.[0];
-                  const deltaText = extractOpenAIChoiceText(choice);
-                  const thinking = extractOpenAIChoiceReasoning(choice);
+                  const deltaText = choice?.delta?.content || choice?.text || '';
+                  const thinking = choice?.delta?.reasoning_content || '';
                   const toolCalls = choice?.delta?.tool_calls || [];
                   const shouldParseBlazeToolText = isBlazeApiProvider(baseUrl);
 
@@ -1071,6 +1080,76 @@ async function proxyRequest(req, res) {
       if (shouldBuffer) {
         let finalBody = rawBody;
         let contentType = upstreamRes.headers['content-type'] || 'application/json';
+
+        // ── Convert buffered JSON → SSE when upstream ignored stream=true ──
+        // If we already started an SSE stream (anthropicTranslator running) but
+        // the upstream returned a complete JSON body, translate it through the
+        // translator so Claude CLI receives proper Anthropic SSE events.
+        if (req.__convertToSSE && anthropicTranslator) {
+          try {
+            const parsed = JSON.parse(rawBody);
+            captureUsage(parsed);
+            if (Array.isArray(parsed.choices)) {
+              // OpenAI-shape response
+              const choice = parsed.choices[0];
+              const text = choice?.message?.content || choice?.text || '';
+              const thinking = choice?.message?.reasoning_content || '';
+              const toolCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
+              if (text || thinking) anthropicTranslator.pushDelta(text, thinking);
+              for (const tc of toolCalls) anthropicTranslator.pushToolCallDelta(tc);
+              const fr = choice?.finish_reason;
+              let stopReason = 'end_turn';
+              if (fr === 'tool_calls' || fr === 'function_call') stopReason = 'tool_use';
+              else if (fr === 'length') stopReason = 'max_tokens';
+              applyEstimatedUsage();
+              anthropicTranslator.finish(stopReason, capturedUsage);
+            } else {
+              // Anthropic-shape (or unknown) — extract text from content blocks
+              const content = Array.isArray(parsed.content) ? parsed.content : [];
+              let text = '';
+              let thinking = '';
+              const toolBlocks = [];
+              for (const block of content) {
+                if (!block || typeof block !== 'object') continue;
+                if (block.type === 'text' && typeof block.text === 'string') text += block.text;
+                else if (block.type === 'thinking' && typeof block.thinking === 'string') thinking += block.thinking;
+                else if (block.type === 'tool_use') toolBlocks.push(block);
+              }
+              if (text || thinking) anthropicTranslator.pushDelta(text, thinking);
+              for (const tb of toolBlocks) {
+                anthropicTranslator.pushToolCallDelta({
+                  id: tb.id,
+                  function: { name: tb.name, arguments: tb.input },
+                });
+              }
+              const stopReason = parsed.stop_reason || (toolBlocks.length > 0 ? 'tool_use' : 'end_turn');
+              applyEstimatedUsage();
+              anthropicTranslator.finish(stopReason, capturedUsage);
+            }
+          } catch (e) {
+            console.error('[proxy] Failed to convert buffered JSON to SSE:', e.message);
+            anthropicTranslator.finish('end_turn', capturedUsage);
+          }
+          // Skip the normal buffered-body write — translator already sent SSE
+          res.end();
+
+          await addLog({
+            optimization: optimizationMeta,
+            method: req.method,
+            path: req.path,
+            model: targetModel,
+            status: upstreamRes.status,
+            latencyMs: Date.now() - startTime,
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            tokenUsageEstimated,
+            streaming: isStreaming,
+            provider: providerName,
+            performance: timing,
+          }, userId, accessKey);
+          return;
+        }
 
         // Normalization: OpenAI clients expect /v1/models to return { data: [...] }
         if (req.path === '/models') {

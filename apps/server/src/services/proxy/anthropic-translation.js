@@ -156,45 +156,6 @@ function tryParseToolCallsFromJsonText(text) {
   }
 }
 
-function extractOpenAITextContent(content) {
-  if (typeof content === 'string') return content;
-  if (!content) return '';
-
-  if (Array.isArray(content)) {
-    return content.map(extractOpenAITextContent).filter(Boolean).join('');
-  }
-
-  if (typeof content === 'object') {
-    if (typeof content.text === 'string') return content.text;
-    if (typeof content.content === 'string') return content.content;
-    if (typeof content.value === 'string') return content.value;
-    if (typeof content.output_text === 'string') return content.output_text;
-    if (typeof content.delta === 'string') return content.delta;
-    if (content.text && typeof content.text === 'object') return extractOpenAITextContent(content.text);
-    if (content.content && typeof content.content === 'object') return extractOpenAITextContent(content.content);
-  }
-
-  return '';
-}
-
-function extractOpenAIChoiceText(choice) {
-  return extractOpenAITextContent(choice?.delta?.content)
-    || extractOpenAITextContent(choice?.delta?.text)
-    || extractOpenAITextContent(choice?.delta?.output_text)
-    || extractOpenAITextContent(choice?.text)
-    || extractOpenAITextContent(choice?.message?.content)
-    || extractOpenAITextContent(choice?.message?.output_text);
-}
-
-function extractOpenAIChoiceReasoning(choice) {
-  return extractOpenAITextContent(choice?.delta?.reasoning_content)
-    || extractOpenAITextContent(choice?.delta?.reasoning)
-    || extractOpenAITextContent(choice?.delta?.reasoning_text)
-    || extractOpenAITextContent(choice?.message?.reasoning_content)
-    || extractOpenAITextContent(choice?.message?.reasoning)
-    || extractOpenAITextContent(choice?.message?.reasoning_text);
-}
-
 /**
  * translateOpenAIToAnthropic — Converts OpenAI chat completion response
  * to Anthropic message response format.
@@ -202,12 +163,11 @@ function extractOpenAIChoiceReasoning(choice) {
 function translateOpenAIToAnthropic(openaiRes, model) {
   const choice = openaiRes.choices?.[0];
   const message = choice?.message;
-
+  
   const content = [];
-  const messageText = extractOpenAITextContent(message?.content) || extractOpenAIChoiceText(choice);
-  const textToolCalls = parseToolCallsFromJsonText(messageText);
-  if (messageText && textToolCalls.length === 0) {
-    content.push({ type: 'text', text: messageText });
+  const textToolCalls = parseToolCallsFromJsonText(message?.content);
+  if (message?.content && textToolCalls.length === 0) {
+    content.push({ type: 'text', text: message.content });
   }
   
   const toolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
@@ -449,8 +409,5 @@ class AnthropicSSETranslator {
 module.exports = {
   tryParseToolCallsFromJsonText,
   translateOpenAIToAnthropic,
-  extractOpenAIChoiceReasoning,
-  extractOpenAIChoiceText,
-  extractOpenAITextContent,
   AnthropicSSETranslator,
 };
