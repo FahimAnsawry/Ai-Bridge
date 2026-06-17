@@ -47,6 +47,8 @@ const {
 const {
   tryParseToolCallsFromJsonText,
   translateOpenAIToAnthropic,
+  extractOpenAIChoiceReasoning,
+  extractOpenAIChoiceText,
   AnthropicSSETranslator,
 } = require('./proxy/anthropic-translation');
 const {
@@ -954,8 +956,8 @@ async function proxyRequest(req, res) {
 
                   // OpenAI-format translation
                   const choice = obj.choices?.[0];
-                  const deltaText = choice?.delta?.content || choice?.text || '';
-                  const thinking = choice?.delta?.reasoning_content || '';
+                  const deltaText = extractOpenAIChoiceText(choice);
+                  const thinking = extractOpenAIChoiceReasoning(choice);
                   const toolCalls = choice?.delta?.tool_calls || [];
                   const shouldParseBlazeToolText = isBlazeApiProvider(baseUrl);
 

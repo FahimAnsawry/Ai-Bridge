@@ -99,13 +99,17 @@ function extractCompletionTextForUsage(source = {}) {
   if (Array.isArray(source.choices)) {
     for (const choice of source.choices) {
       appendContent(choice?.message?.content);
+      appendContent(choice?.message?.output_text);
       appendContent(choice?.delta?.content);
+      appendContent(choice?.delta?.text);
+      appendContent(choice?.delta?.output_text);
       if (typeof choice?.text === 'string') parts.push(choice.text);
     }
   }
 
   appendContent(source.content);
   appendContent(source.message?.content);
+  appendContent(source.message?.output_text);
   if (typeof source.output_text === 'string') parts.push(source.output_text);
 
   return parts.join('');

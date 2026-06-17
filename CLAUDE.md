@@ -22,7 +22,7 @@ No test suite is configured.
 
 ## Architecture
 
-This is a local AI bridge server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (SwiftRouter, Anthropic, OpenAI-compatible APIs, GitHub Copilot).
+This is a local AI bridge server with a React management dashboard. It sits between AI coding tools (Claude Code, Cline, Roo Code, Kilo Code) and upstream AI providers (Anthropic, OpenAI-compatible APIs, GitHub Copilot).
 
 ### Single-server setup
 
@@ -51,7 +51,7 @@ AI Tool → POST :3000/v1/messages
 | File | Role |
 |------|------|
 | `apps/server/src/services/proxy.js` | Core proxy: message normalization, model routing, token optimization, response caching, rate-limit failover, provider auto-switch |
-| `apps/server/src/services/proxy-runtime.js` | Proxy HTTP server lifecycle (start/stop/restart), SwiftRouter model sync on startup |
+| `apps/server/src/services/proxy-runtime.js` | Proxy HTTP server lifecycle (start/stop/restart) |
 | `apps/server/src/services/admin-service.js` | Dashboard business logic: status, config CRUD, logs, model catalog, provider health |
 | `apps/server/src/services/copilot-proxy.js` | Translates Anthropic format → GitHub Copilot API |
 | `apps/server/src/services/copilot-auth.js` | GitHub Device Flow OAuth for Copilot token acquisition |
