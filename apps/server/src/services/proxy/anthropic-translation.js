@@ -209,7 +209,7 @@ function translateOpenAIToAnthropic(openaiRes, model) {
   if (messageText && textToolCalls.length === 0) {
     content.push({ type: 'text', text: messageText });
   }
-
+  
   const toolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
     ? message.tool_calls
     : textToolCalls;
@@ -451,5 +451,6 @@ module.exports = {
   translateOpenAIToAnthropic,
   extractOpenAIChoiceReasoning,
   extractOpenAIChoiceText,
+  extractOpenAITextContent,
   AnthropicSSETranslator,
 };
